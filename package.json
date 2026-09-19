@@ -1,18 +1,19 @@
 {
-"name": "whatsapp-web-test-railway",
-"version": "1.0.0",
-"description": "Minimal test for whatsapp-web.js working on platforms without shell access.",
-"main": "server.js",
-"scripts": {
-"start": "node server.js"
-},
-"dependencies": {
-"express": "^4.19.2",
-"qrcode": "^1.5.3",
-"whatsapp-web.js": "^1.23.0",
-"puppeteer": "^22.6.0"
-},
-"engines": {
-"node": ">=18.0.0"
-}
+  "_path": "package.json",
+  "name": "whatsapp-web-test-railway",
+  "version": "1.0.0",
+  "description": "Minimal test for whatsapp-web.js working on platforms without shell access.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "qrcode": "^1.5.3",
+    "whatsapp-web.js": "^1.23.0",
+    "puppeteer": "^22.6.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

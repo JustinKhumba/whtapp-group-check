@@ -16,8 +16,17 @@ const client = new Client({
         dataPath: authPath
     }),
     puppeteer: {
-        // Essential flags for running in server environments like Railway
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        // These extra flags are CRITICAL for cloud environments like Railway
+        // They prevent Chrome from running out of memory or looking for graphics drivers
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage', 
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+        ]
     }
 });
 
@@ -32,7 +41,7 @@ client.on('qr', async (qr) => {
 
 client.on('authenticated', () => {
     isAuthenticated = true;
-    qrImageURL = ''; // Clear QR code once logged in
+    qrImageURL = ''; 
     console.log('WhatsApp authenticated.');
 });
 

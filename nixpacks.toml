@@ -1,7 +1,7 @@
-
 providers = ["node"]
 
 [phases.setup]
+
 aptPkgs = [
 "libglib2.0-0",
 "libnss3",
@@ -18,5 +18,7 @@ aptPkgs = [
 "libgbm1",
 "libasound2",
 "libpango-1.0-0",
-"libcairo2"
+"libcairo2",
+"libx11-xcb1",
+"libxshmfence1"
 ]

@@ -2,7 +2,7 @@ providers = ["node"]
 
 [phases.setup]
 aptPkgs = [
-  "...",
+  "chromium",
   "wget",
   "ca-certificates",
   "fonts-liberation",
@@ -25,6 +25,10 @@ aptPkgs = [
   "libxtst6",
   "xdg-utils"
 ]
+
+[variables]
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
+PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
 
 [start]
 cmd = "npm start"

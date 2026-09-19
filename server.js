@@ -95,8 +95,7 @@ function startWhatsAppClient() {
         puppeteer: {
             headless: true,
 
-            executablePath:
-                process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
 
             args: [
                 '--no-sandbox',

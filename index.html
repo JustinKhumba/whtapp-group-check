@@ -1,0 +1,87 @@
+<!-- File: ./index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Group Member Checker</title>
+</head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background-color: #f4f4f9;">
+
+    <div style="background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h2 style="color: #25D366; text-align: center;">WhatsApp Group Checker</h2>
+        <p style="text-align: center; color: #555;">Active Session: 91 9863477674</p>
+        
+        <form id="checkForm" style="display: flex; flex-direction: column; gap: 15px; margin-top: 20px;">
+            <div>
+                <label for="groupId" style="font-weight: bold; color: #333;">Group ID (e.g., 1234567890@g.us):</label>
+                <input type="text" id="groupId" required placeholder="Enter WhatsApp Group ID" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+            </div>
+            
+            <div>
+                <label for="phoneNumber" style="font-weight: bold; color: #333;">Phone Number to Check (with country code, no +):</label>
+                <input type="text" id="phoneNumber" required placeholder="e.g., 919876543210" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+            </div>
+
+            <p style="font-size: 0.9em; color: #777;">Service Charge per check: ₹0</p>
+            
+            <button type="submit" style="background-color: #25D366; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">Check Membership</button>
+        </form>
+
+        <div id="result" style="margin-top: 25px; padding: 15px; border-radius: 4px; display: none; text-align: center; font-weight: bold;">
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('checkForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const groupId = document.getElementById('groupId').value;
+            const phoneNumber = document.getElementById('phoneNumber').value;
+            const resultDiv = document.getElementById('result');
+            const submitBtn = document.querySelector('button[type="submit"]');
+
+            submitBtn.textContent = 'Checking...';
+            submitBtn.disabled = true;
+            resultDiv.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/check-member', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ groupId, phoneNumber })
+                });
+
+                const data = await response.json();
+
+                resultDiv.style.display = 'block';
+                if (data.error) {
+                    resultDiv.style.backgroundColor = '#ffebee';
+                    resultDiv.style.color = '#c62828';
+                    resultDiv.textContent = 'Error: ' + data.error;
+                } else {
+                    if (data.isMember) {
+                        resultDiv.style.backgroundColor = '#e8f5e9';
+                        resultDiv.style.color = '#2e7d32';
+                        resultDiv.textContent = `Yes, the number is in the group.`;
+                    } else {
+                        resultDiv.style.backgroundColor = '#fff3e0';
+                        resultDiv.style.color = '#ef6c00';
+                        resultDiv.textContent = `No, the number is NOT in the group.`;
+                    }
+                }
+            } catch (error) {
+                resultDiv.style.display = 'block';
+                resultDiv.style.backgroundColor = '#ffebee';
+                resultDiv.style.color = '#c62828';
+                resultDiv.textContent = 'Failed to connect to the server.';
+            } finally {
+                submitBtn.textContent = 'Check Membership';
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 node_modules/
-.env
 .wwebjs_auth/
-.DS_Store
+.wwebjs_cache/
+session_data/
+npm-debug.log

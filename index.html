@@ -1,4 +1,4 @@
-<!-- File: ./index.html -->
+<!-- ./index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,29 +10,63 @@
 
     <div style="background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
         <h2 style="color: #25D366; text-align: center;">WhatsApp Group Checker</h2>
-        <p style="text-align: center; color: #555;">Active Session: 91 9863477674</p>
+        <p style="text-align: center; color: #555;">Target Session: 91 9863477674</p>
         
-        <form id="checkForm" style="display: flex; flex-direction: column; gap: 15px; margin-top: 20px;">
-            <div>
-                <label for="groupId" style="font-weight: bold; color: #333;">Group ID (e.g., 1234567890@g.us):</label>
-                <input type="text" id="groupId" required placeholder="Enter WhatsApp Group ID" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
-            </div>
-            
-            <div>
-                <label for="phoneNumber" style="font-weight: bold; color: #333;">Phone Number to Check (with country code, no +):</label>
-                <input type="text" id="phoneNumber" required placeholder="e.g., 919876543210" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
-            </div>
+        <div id="qrSection" style="display: none; text-align: center; margin-top: 20px;">
+            <h3 style="color: #333;">Link WhatsApp Account</h3>
+            <p style="color: #666; font-size: 0.9em;">Scan this QR code with the target WhatsApp account to initialize the session.</p>
+            <img id="qrImage" src="" alt="WhatsApp QR Code" style="max-width: 250px; margin: 15px auto; display: block; border: 1px solid #ddd; padding: 10px; border-radius: 8px;">
+            <p style="color: #25D366; font-size: 0.8em; font-weight: bold;">Waiting for scan...</p>
+        </div>
 
-            <p style="font-size: 0.9em; color: #777;">Service Charge per check: ₹0</p>
-            
-            <button type="submit" style="background-color: #25D366; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">Check Membership</button>
-        </form>
+        <div id="formSection" style="display: none;">
+            <form id="checkForm" style="display: flex; flex-direction: column; gap: 15px; margin-top: 20px;">
+                <div>
+                    <label for="groupId" style="font-weight: bold; color: #333;">Group ID (e.g., 1234567890@g.us):</label>
+                    <input type="text" id="groupId" required placeholder="Enter WhatsApp Group ID" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </div>
+                
+                <div>
+                    <label for="phoneNumber" style="font-weight: bold; color: #333;">Phone Number to Check (with country code, no +):</label>
+                    <input type="text" id="phoneNumber" required placeholder="e.g., 919876543210" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </div>
 
-        <div id="result" style="margin-top: 25px; padding: 15px; border-radius: 4px; display: none; text-align: center; font-weight: bold;">
+                <p style="font-size: 0.9em; color: #777;">Service Charge per check: ₹0.00</p>
+                
+                <button type="submit" style="background-color: #25D366; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">Check Membership</button>
+            </form>
+
+            <div id="result" style="margin-top: 25px; padding: 15px; border-radius: 4px; display: none; text-align: center; font-weight: bold;">
+            </div>
         </div>
     </div>
 
     <script>
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                if (data.isAuthenticated) {
+                    document.getElementById('qrSection').style.display = 'none';
+                    document.getElementById('formSection').style.display = 'block';
+                } else {
+                    document.getElementById('qrSection').style.display = 'block';
+                    document.getElementById('formSection').style.display = 'none';
+                    
+                    if (data.qr) {
+                        document.getElementById('qrImage').src = data.qr;
+                    }
+                    
+                    setTimeout(checkServerStatus, 2500);
+                }
+            } catch (error) {
+                setTimeout(checkServerStatus, 5000);
+            }
+        }
+
+        checkServerStatus();
+
         document.getElementById('checkForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             

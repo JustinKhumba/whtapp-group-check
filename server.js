@@ -1,29 +1,58 @@
-// File: ./server.js
+// ./server.js
 const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+const qrcode = require('qrcode');
 const path = require('path');
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.static(__dirname));
 
+const sessionPath = process.env.RAILWAY_ENVIRONMENT ? '/app/session_data' : './session_data';
+
+let currentQR = '';
+let isAuthenticated = false;
+
 const client = new Client({
-    authStrategy: new LocalAuth({ clientId: "session-919863477674" }),
+    authStrategy: new LocalAuth({ 
+        clientId: "session-919863477674",
+        dataPath: sessionPath
+    }),
     puppeteer: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+        ]
     }
 });
 
-client.on('qr', (qr) => {
-    console.log('Scan this QR code with your WhatsApp number 91 9863477674:');
-    qrcode.generate(qr, { small: true });
+client.on('qr', async (qr) => {
+    try {
+        currentQR = await qrcode.toDataURL(qr);
+    } catch (err) {
+        console.error('Failed to generate QR code image');
+    }
 });
 
 client.on('ready', () => {
-    console.log('WhatsApp Client is ready and authenticated!');
+    isAuthenticated = true;
+    currentQR = '';
+});
+
+client.on('authenticated', () => {
+    isAuthenticated = true;
+    currentQR = '';
+});
+
+client.on('disconnected', () => {
+    isAuthenticated = false;
 });
 
 client.initialize();
@@ -32,7 +61,15 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+app.get('/api/status', (req, res) => {
+    res.json({ isAuthenticated, qr: currentQR });
+});
+
 app.post('/api/check-member', async (req, res) => {
+    if (!isAuthenticated) {
+        return res.status(401).json({ error: 'WhatsApp client is not authenticated yet. Please scan the QR code.' });
+    }
+
     const { groupId, phoneNumber } = req.body;
 
     if (!groupId || !phoneNumber) {
@@ -41,7 +78,6 @@ app.post('/api/check-member', async (req, res) => {
 
     try {
         const formattedGroupId = groupId.includes('@g.us') ? groupId : `${groupId}@g.us`;
-        
         let formattedPhoneNumber = phoneNumber.replace(/\D/g, '');
         formattedPhoneNumber = `${formattedPhoneNumber}@c.us`;
 
@@ -62,11 +98,10 @@ app.post('/api/check-member', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error checking group membership:', error);
         res.status(500).json({ error: 'Failed to fetch group data. Ensure the bot is a member of the group.' });
     }
 });
 
 app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+    console.log(`Server running at port ${port}`);
 });

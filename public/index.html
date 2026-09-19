@@ -7,23 +7,7 @@
 
 <h1 id="title">Loading...</h1>
 
-<script>
-    const parts = window.location.pathname.split("/");
 
-    if (parts[1] === "user") {
-        const userId = parts[2];
-
-        document.getElementById("title").textContent =
-            "User ID: " + userId;
-    }
-
-    if (parts[1] === "check") {
-        const phone = parts[2];
-
-        document.getElementById("title").textContent =
-            "Checking: " + phone;
-    }
-</script>
 
 </body>
 </html>

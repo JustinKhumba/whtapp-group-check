@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Web Library Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            color: #111b21;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+        }
+        h1 { font-size: 24px; margin-bottom: 10px; }
+        p { margin-bottom: 20px; color: #54656f; }
+        .status-badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 5px;
+            background-color: #e9edef;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #00a884;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover { background-color: #008f6f; }
+        #qr-container {
+            margin-top: 20px;
+            min-height: 250px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f0f2f5;
+            border-radius: 10px;
+        }
+        img { max-width: 250px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WhatsApp Web Test</h1>
+        <p>Test if the session initialization works</p>
+        
+        <div class="status-badge" id="status">Status: Idle</div><br>
+        
+        <button onclick="startTest()" id="start-btn">Initialize Library</button>
+        
+        <div id="qr-container">
+            <span id="qr-placeholder">QR Code will appear here</span>
+            <img id="qr-image" src="" alt="WhatsApp QR Code" style="display:none;" />
+        </div>
+    </div>
+
+    <script>
+        // Start the backend initialization process
+        function startTest() {
+            document.getElementById('status').innerText = 'Status: Requesting Initialization...';
+            document.getElementById('start-btn').disabled = true;
+            document.getElementById('start-btn').style.opacity = '0.5';
+            
+            fetch('/api/start')
+                .then(res => res.json())
+                .then(data => console.log('Init Response:', data))
+                .catch(err => console.error('Error:', err));
+        }
+
+        // Poll the server every 2 seconds to get the latest status and QR code
+        setInterval(() => {
+            fetch('/api/status')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('status').innerText = 'Status: ' + data.status;
+                    
+                    const qrImg = document.getElementById('qr-image');
+                    const qrPlaceholder = document.getElementById('qr-placeholder');
+                    
+                    if (data.qr) {
+                        qrImg.src = data.qr;
+                        qrImg.style.display = 'block';
+                        qrPlaceholder.style.display = 'none';
+                    } else {
+                        qrImg.style.display = 'none';
+                        if (data.status !== 'Idle (Not Started)') {
+                            qrPlaceholder.style.display = 'block';
+                            qrPlaceholder.innerText = data.status === 'READY' ? 'Authenticated & Ready!' : 'Waiting...';
+                        }
+                    }
+                })
+                .catch(err => console.error('Polling error:', err));
+        }, 2000);
+    </script>
+</body>
+</html>

@@ -95,8 +95,6 @@ function startWhatsAppClient() {
         puppeteer: {
             headless: true,
 
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
-
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -158,10 +156,13 @@ function startWhatsAppClient() {
         clientError = error.message || 'WhatsApp initialization failed.';
     });
 }
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok'
+    });
+});
 
 app.listen(port, '0.0.0.0', () => {
     console.log(`Server running on port ${port}`);
 
-    // Start WhatsApp without preventing Express from serving the website
-    startWhatsAppClient();
 });

@@ -17,11 +17,15 @@ const PORT = Number(process.env.PORT || 3000);
 const CHAT_LIMIT = 50;
 const MESSAGE_LIMIT = 100;
 
+let db = null;
+let whatsappReady = false;
+
 // =====================================================
 // EXPRESS
 // =====================================================
 
 app.use(express.json());
+
 app.use(
     express.static(
         path.join(__dirname, 'public')
@@ -64,9 +68,16 @@ process.on(
 
 // =====================================================
 // MYSQL
+//
+// ONLY SAVED IN DATABASE:
+// 1. Browser session token
+// 2. Multiple auto replies
+//
+// NOT SAVED:
+// - recent chats
+// - messages
+// - message history
 // =====================================================
-
-let db = null;
 
 function createDatabasePool() {
     const connectionUrl =
@@ -105,11 +116,14 @@ function createDatabasePool() {
 
             charset: 'utf8mb4',
 
-            waitForConnections: true,
+            waitForConnections:
+                true,
 
-            connectionLimit: 10,
+            connectionLimit:
+                10,
 
-            queueLimit: 0
+            queueLimit:
+                0
         });
     }
 
@@ -139,27 +153,36 @@ function createDatabasePool() {
 
         charset: 'utf8mb4',
 
-        waitForConnections: true,
+        waitForConnections:
+            true,
 
-        connectionLimit: 10,
+        connectionLimit:
+            10,
 
-        queueLimit: 0
+        queueLimit:
+            0
     });
 }
+
+// =====================================================
+// DATABASE SQL
+// =====================================================
 
 async function initDatabase() {
     try {
         db = createDatabasePool();
 
-        await db.query('SELECT 1');
+        await db.query(
+            'SELECT 1'
+        );
 
         console.log(
             'MySQL connected.'
         );
 
-        // ---------------------------------------------
-        // BROWSER SESSIONS
-        // ---------------------------------------------
+        // -------------------------------------------------
+        // SESSIONS
+        // -------------------------------------------------
 
         await db.query(`
             CREATE TABLE IF NOT EXISTS sessions (
@@ -179,51 +202,12 @@ async function initDatabase() {
 
                 PRIMARY KEY (id),
 
-                UNIQUE KEY
-                    unique_session_token (
-                        session_token
-                    ),
-
-                INDEX
-                    idx_session_account (
-                        account_number
-                    )
-            )
-            ENGINE=InnoDB
-            DEFAULT CHARSET=utf8mb4
-            COLLATE=utf8mb4_unicode_ci
-        `);
-
-        // ---------------------------------------------
-        // RECENT CHATS
-        // ---------------------------------------------
-
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS recent_chats (
-                account_number VARCHAR(32) NOT NULL,
-
-                chat_id VARCHAR(255) NOT NULL,
-
-                chat_name VARCHAR(255)
-                    NOT NULL DEFAULT 'Unknown',
-
-                unread_count INT
-                    NOT NULL DEFAULT 0,
-
-                chat_timestamp BIGINT
-                    NOT NULL DEFAULT 0,
-
-                is_group TINYINT(1)
-                    NOT NULL DEFAULT 0,
-
-                PRIMARY KEY (
-                    account_number,
-                    chat_id
+                UNIQUE KEY unique_session_token (
+                    session_token
                 ),
 
-                INDEX idx_recent_chats (
-                    account_number,
-                    chat_timestamp
+                INDEX idx_session_account (
+                    account_number
                 )
             )
             ENGINE=InnoDB
@@ -231,66 +215,24 @@ async function initDatabase() {
             COLLATE=utf8mb4_unicode_ci
         `);
 
-        // ---------------------------------------------
-        // CHAT MESSAGES
-        // ---------------------------------------------
-
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS chat_messages (
-                account_number VARCHAR(32) NOT NULL,
-
-                chat_id VARCHAR(255) NOT NULL,
-
-                message_id VARCHAR(255) NOT NULL,
-
-                from_me TINYINT(1)
-                    NOT NULL DEFAULT 0,
-
-                sender_id VARCHAR(255)
-                    DEFAULT NULL,
-
-                receiver_id VARCHAR(255)
-                    DEFAULT NULL,
-
-                body MEDIUMTEXT
-                    DEFAULT NULL,
-
-                message_type VARCHAR(100)
-                    DEFAULT NULL,
-
-                message_timestamp BIGINT
-                    NOT NULL DEFAULT 0,
-
-                PRIMARY KEY (
-                    account_number,
-                    message_id
-                ),
-
-                INDEX idx_chat_messages (
-                    account_number,
-                    chat_id,
-                    message_timestamp
-                )
-            )
-            ENGINE=InnoDB
-            DEFAULT CHARSET=utf8mb4
-            COLLATE=utf8mb4_unicode_ci
-        `);
-
-        // ---------------------------------------------
+        // -------------------------------------------------
         // AUTO REPLIES
-        // ---------------------------------------------
+        //
+        // Multiple replies per WhatsApp account.
+        // Same trigger cannot exist twice for same account.
+        // -------------------------------------------------
 
         await db.query(`
             CREATE TABLE IF NOT EXISTS auto_replies (
-                account_number VARCHAR(32)
-                    NOT NULL,
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+                account_number VARCHAR(32) NOT NULL,
 
                 enabled TINYINT(1)
-                    NOT NULL DEFAULT 0,
+                    NOT NULL DEFAULT 1,
 
                 trigger_text VARCHAR(255)
-                    NOT NULL DEFAULT 'START',
+                    NOT NULL,
 
                 reply_text MEDIUMTEXT
                     NOT NULL,
@@ -299,7 +241,14 @@ async function initDatabase() {
                     NOT NULL DEFAULT CURRENT_TIMESTAMP
                     ON UPDATE CURRENT_TIMESTAMP,
 
-                PRIMARY KEY (
+                PRIMARY KEY (id),
+
+                UNIQUE KEY unique_account_trigger (
+                    account_number,
+                    trigger_text
+                ),
+
+                INDEX idx_auto_reply_account (
                     account_number
                 )
             )
@@ -311,16 +260,26 @@ async function initDatabase() {
         console.log(
             'Database tables ready.'
         );
+
+        /*
+         * OLD TABLES ARE NO LONGER USED:
+         *
+         * recent_chats
+         * chat_messages
+         *
+         * They are intentionally NOT created by this server.
+         *
+         * To delete old tables manually once:
+         *
+         * DROP TABLE IF EXISTS recent_chats;
+         * DROP TABLE IF EXISTS chat_messages;
+         */
     } catch (error) {
         console.error(
             'MySQL connection failed:',
             error.message
         );
 
-        /*
-         * Do not stop WhatsApp just because
-         * the database is unavailable.
-         */
         db = null;
     }
 }
@@ -353,7 +312,9 @@ async function createOrRestoreSession(
                     [suppliedToken]
                 );
 
-            if (rows.length > 0) {
+            if (
+                rows.length > 0
+            ) {
                 await db.execute(
                     `
                     UPDATE sessions
@@ -398,8 +359,11 @@ async function createOrRestoreSession(
     }
 
     return {
-        session_token: newToken,
-        account_number: null
+        session_token:
+            newToken,
+
+        account_number:
+            null
     };
 }
 
@@ -440,7 +404,10 @@ async function updateSessionAccount(
 async function touchSession(
     sessionToken
 ) {
-    if (!db || !sessionToken) {
+    if (
+        !db ||
+        !sessionToken
+    ) {
         return;
     }
 
@@ -477,158 +444,9 @@ function getAccountNumber() {
 }
 
 // =====================================================
-// RECENT CHATS
-// =====================================================
-
-async function getStoredChats(
-    accountNumber
-) {
-    if (
-        !db ||
-        !accountNumber
-    ) {
-        return [];
-    }
-
-    try {
-        const [rows] =
-            await db.execute(
-                `
-                SELECT
-                    chat_id AS id,
-                    chat_name AS name,
-                    unread_count AS unread,
-                    chat_timestamp AS timestamp,
-                    is_group AS isGroup
-                FROM recent_chats
-                WHERE account_number = ?
-                ORDER BY chat_timestamp DESC
-                LIMIT ${CHAT_LIMIT}
-                `,
-                [accountNumber]
-            );
-
-        return rows.map(
-            row => ({
-                id:
-                    String(row.id),
-
-                name:
-                    String(
-                        row.name ||
-                        'Unknown'
-                    ),
-
-                unread:
-                    Number(
-                        row.unread || 0
-                    ),
-
-                timestamp:
-                    Number(
-                        row.timestamp || 0
-                    ),
-
-                isGroup:
-                    Boolean(
-                        row.isGroup
-                    )
-            })
-        );
-    } catch (error) {
-        console.error(
-            'getStoredChats error:',
-            error.message
-        );
-
-        return [];
-    }
-}
-
-async function saveRecentChats(
-    accountNumber,
-    chats
-) {
-    if (
-        !db ||
-        !accountNumber ||
-        !Array.isArray(chats)
-    ) {
-        return;
-    }
-
-    for (const chat of chats) {
-        if (
-            !chat ||
-            !chat.id
-        ) {
-            continue;
-        }
-
-        try {
-            await db.execute(
-                `
-                INSERT INTO recent_chats (
-                    account_number,
-                    chat_id,
-                    chat_name,
-                    unread_count,
-                    chat_timestamp,
-                    is_group
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-
-                ON DUPLICATE KEY UPDATE
-                    chat_name =
-                        VALUES(chat_name),
-
-                    unread_count =
-                        VALUES(unread_count),
-
-                    chat_timestamp =
-                        VALUES(chat_timestamp),
-
-                    is_group =
-                        VALUES(is_group)
-                `,
-                [
-                    accountNumber,
-
-                    String(
-                        chat.id
-                    ),
-
-                    String(
-                        chat.name ||
-                        'Unknown'
-                    ).slice(0, 255),
-
-                    Number(
-                        chat.unread || 0
-                    ),
-
-                    Number(
-                        chat.timestamp || 0
-                    ),
-
-                    chat.isGroup ? 1 : 0
-                ]
-            );
-        } catch (error) {
-            console.error(
-                'Failed saving chat:',
-                error.message
-            );
-        }
-    }
-}
-
-// =====================================================
-// DIRECT CHAT FETCH
+// LIVE RECENT CHATS
 //
-// We intentionally do NOT use:
-// client.getChats()
-//
+// NO DATABASE
 // =====================================================
 
 async function getRecentChatsDirect() {
@@ -638,29 +456,29 @@ async function getRecentChatsDirect() {
         );
     }
 
-    const result =
+    const chats =
         await client.pupPage.evaluate(
             () => {
-                try {
-                    const collections =
-                        window.require(
-                            'WAWebCollections'
-                        );
+                const collections =
+                    window.require(
+                        'WAWebCollections'
+                    );
 
-                    if (
-                        !collections ||
-                        !collections.Chat
-                    ) {
-                        throw new Error(
-                            'WAWebCollections.Chat is unavailable.'
-                        );
-                    }
+                if (
+                    !collections ||
+                    !collections.Chat
+                ) {
+                    throw new Error(
+                        'WAWebCollections.Chat is unavailable.'
+                    );
+                }
 
-                    const models =
-                        collections.Chat
-                            .getModelsArray();
+                const models =
+                    collections.Chat
+                        .getModelsArray();
 
-                    return models.map(
+                return models
+                    .map(
                         chat => {
                             let id = null;
 
@@ -707,18 +525,18 @@ async function getRecentChatsDirect() {
                                     'Unknown';
                             } catch (_) {}
 
-                            let timestamp = 0;
+                            let timestamp =
+                                0;
 
                             try {
                                 timestamp =
                                     Number(
                                         chat.t || 0
                                     );
-                            } catch (_) {
-                                timestamp = 0;
-                            }
+                            } catch (_) {}
 
-                            let unread = 0;
+                            let unread =
+                                0;
 
                             try {
                                 unread =
@@ -728,19 +546,11 @@ async function getRecentChatsDirect() {
                                     );
                             } catch (_) {}
 
-                            let isGroup =
-                                false;
-
-                            try {
-                                isGroup =
-                                    String(id)
-                                        .endsWith(
-                                            '@g.us'
-                                        );
-                            } catch (_) {
-                                isGroup =
-                                    false;
-                            }
+                            const isGroup =
+                                String(id)
+                                    .endsWith(
+                                        '@g.us'
+                                    );
 
                             return {
                                 id:
@@ -759,17 +569,12 @@ async function getRecentChatsDirect() {
                                 isGroup
                             };
                         }
-                    );
-                } catch (error) {
-                    throw new Error(
-                        error.message
-                    );
-                }
+                    )
+                    .filter(Boolean);
             }
         );
 
-    return result
-        .filter(Boolean)
+    return chats
         .sort(
             (a, b) =>
                 Number(
@@ -786,244 +591,12 @@ async function getRecentChatsDirect() {
 }
 
 // =====================================================
-// CHAT MESSAGES
-// =====================================================
-
-async function getStoredMessages(
-    accountNumber,
-    chatId
-) {
-    if (
-        !db ||
-        !accountNumber ||
-        !chatId
-    ) {
-        return [];
-    }
-
-    try {
-        const [rows] =
-            await db.execute(
-                `
-                SELECT
-                    message_id AS id,
-                    chat_id AS chatId,
-                    from_me AS fromMe,
-                    sender_id AS senderId,
-                    receiver_id AS receiverId,
-                    body,
-                    message_type AS type,
-                    message_timestamp AS timestamp
-                FROM chat_messages
-                WHERE account_number = ?
-                  AND chat_id = ?
-                ORDER BY
-                    message_timestamp ASC
-                LIMIT ${MESSAGE_LIMIT}
-                `,
-                [
-                    accountNumber,
-                    chatId
-                ]
-            );
-
-        return rows.map(
-            row => ({
-                id:
-                    String(row.id),
-
-                chatId:
-                    String(row.chatId),
-
-                fromMe:
-                    Boolean(
-                        row.fromMe
-                    ),
-
-                senderId:
-                    row.senderId
-                        ? String(
-                            row.senderId
-                        )
-                        : null,
-
-                receiverId:
-                    row.receiverId
-                        ? String(
-                            row.receiverId
-                        )
-                        : null,
-
-                body:
-                    row.body == null
-                        ? ''
-                        : String(
-                            row.body
-                        ),
-
-                type:
-                    row.type ||
-                    'chat',
-
-                timestamp:
-                    Number(
-                        row.timestamp ||
-                        0
-                    )
-            })
-        );
-    } catch (error) {
-        console.error(
-            'getStoredMessages error:',
-            error.message
-        );
-
-        return [];
-    }
-}
-
-async function saveMessageToDatabase(
-    accountNumber,
-    message,
-    chatId
-) {
-    if (
-        !db ||
-        !accountNumber ||
-        !message
-    ) {
-        return null;
-    }
-
-    const messageId =
-        message.id?._serialized ||
-        message.id?.id ||
-        null;
-
-    if (!messageId) {
-        return null;
-    }
-
-    const actualChatId =
-        chatId ||
-        message.from ||
-        message.to ||
-        null;
-
-    if (!actualChatId) {
-        return null;
-    }
-
-    const data = {
-        id:
-            String(
-                messageId
-            ),
-
-        chatId:
-            String(
-                actualChatId
-            ),
-
-        fromMe:
-            Boolean(
-                message.fromMe
-            ),
-
-        senderId:
-            message.author ||
-            message.from ||
-            null,
-
-        receiverId:
-            message.to ||
-            null,
-
-        body:
-            message.body == null
-                ? ''
-                : String(
-                    message.body
-                ),
-
-        type:
-            message.type ||
-            'chat',
-
-        timestamp:
-            Number(
-                message.timestamp ||
-                message.t ||
-                0
-            )
-    };
-
-    try {
-        await db.execute(
-            `
-            INSERT INTO chat_messages (
-                account_number,
-                chat_id,
-                message_id,
-                from_me,
-                sender_id,
-                receiver_id,
-                body,
-                message_type,
-                message_timestamp
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-
-            ON DUPLICATE KEY UPDATE
-                body =
-                    VALUES(body),
-
-                message_type =
-                    VALUES(message_type),
-
-                message_timestamp =
-                    VALUES(message_timestamp)
-            `,
-            [
-                accountNumber,
-
-                data.chatId,
-
-                data.id,
-
-                data.fromMe
-                    ? 1
-                    : 0,
-
-                data.senderId,
-
-                data.receiverId,
-
-                data.body,
-
-                data.type,
-
-                data.timestamp
-            ]
-        );
-
-        return data;
-    } catch (error) {
-        console.error(
-            'saveMessageToDatabase error:',
-            error.message
-        );
-
-        return null;
-    }
-}
-
-// =====================================================
-// FETCH MESSAGES FOR ONE CHAT
+// LIVE MESSAGES
+//
+// NO DATABASE
 // =====================================================
 
 async function fetchMessagesForChat(
-    accountNumber,
     chatId
 ) {
     if (!client.pupPage) {
@@ -1034,7 +607,7 @@ async function fetchMessagesForChat(
 
     const messages =
         await client.pupPage.evaluate(
-            async (
+            (
                 requestedChatId,
                 limit
             ) => {
@@ -1052,7 +625,7 @@ async function fetchMessagesForChat(
                     );
                 }
 
-                let models =
+                const models =
                     collections.Chat
                         .getModelsArray();
 
@@ -1064,7 +637,8 @@ async function fetchMessagesForChat(
                                     item.id &&
                                     (
                                         item.id._serialized ===
-                                        requestedChatId ||
+                                            requestedChatId ||
+
                                         (
                                             item.id.user &&
                                             item.id.server &&
@@ -1085,16 +659,14 @@ async function fetchMessagesForChat(
                     );
                 }
 
-                /*
-                 * Use messages already available
-                 * in this chat model.
-                 */
-                let messageModels = [];
+                let messageModels =
+                    [];
 
                 try {
                     if (
                         chat.msgs &&
-                        typeof chat.msgs.getModelsArray ===
+                        typeof chat.msgs
+                            .getModelsArray ===
                             'function'
                     ) {
                         messageModels =
@@ -1102,7 +674,8 @@ async function fetchMessagesForChat(
                                 .getModelsArray();
                     }
                 } catch (_) {
-                    messageModels = [];
+                    messageModels =
+                        [];
                 }
 
                 messageModels =
@@ -1110,154 +683,137 @@ async function fetchMessagesForChat(
                         -limit
                     );
 
-                return messageModels.map(
-                    message => {
-                        let id = null;
-
-                        try {
-                            id =
-                                message.id?._serialized ||
-                                message.id?.id ||
+                return messageModels
+                    .map(
+                        message => {
+                            let id =
                                 null;
-                        } catch (_) {}
 
-                        if (!id) {
-                            return null;
-                        }
+                            try {
+                                id =
+                                    message.id?._serialized ||
+                                    message.id?.id ||
+                                    null;
+                            } catch (_) {}
 
-                        return {
-                            id:
-                                String(id),
+                            if (!id) {
+                                return null;
+                            }
 
-                            fromMe:
-                                Boolean(
-                                    message.fromMe ||
-                                    message.id?.fromMe
-                                ),
+                            return {
+                                id:
+                                    String(id),
 
-                            from:
-                                message.from?._serialized ||
-                                message.from ||
-                                null,
-
-                            to:
-                                message.to?._serialized ||
-                                message.to ||
-                                null,
-
-                            author:
-                                message.author?._serialized ||
-                                message.author ||
-                                null,
-
-                            body:
-                                message.body == null
-                                    ? ''
-                                    : String(
-                                        message.body
+                                fromMe:
+                                    Boolean(
+                                        message.fromMe ||
+                                        message.id?.fromMe
                                     ),
 
-                            type:
-                                message.type ||
-                                'chat',
+                                from:
+                                    message.from?._serialized ||
+                                    message.from ||
+                                    null,
 
-                            timestamp:
-                                Number(
-                                    message.timestamp ||
-                                    message.t ||
-                                    0
-                                )
-                        };
-                    }
-                )
-                .filter(Boolean);
+                                to:
+                                    message.to?._serialized ||
+                                    message.to ||
+                                    null,
+
+                                author:
+                                    message.author?._serialized ||
+                                    message.author ||
+                                    null,
+
+                                body:
+                                    message.body == null
+                                        ? ''
+                                        : String(
+                                            message.body
+                                        ),
+
+                                type:
+                                    message.type ||
+                                    'chat',
+
+                                timestamp:
+                                    Number(
+                                        message.timestamp ||
+                                        message.t ||
+                                        0
+                                    )
+                            };
+                        }
+                    )
+                    .filter(Boolean);
             },
             chatId,
             MESSAGE_LIMIT
         );
 
-    const cleaned =
-        messages
-            .map(
-                message => ({
-                    id:
-                        String(
-                            message.id
-                        ),
+    return messages
+        .map(
+            message => ({
+                id:
+                    String(
+                        message.id
+                    ),
 
-                    chatId:
-                        String(
-                            chatId
-                        ),
+                chatId:
+                    String(
+                        chatId
+                    ),
 
-                    fromMe:
-                        Boolean(
-                            message.fromMe
-                        ),
+                fromMe:
+                    Boolean(
+                        message.fromMe
+                    ),
 
-                    senderId:
-                        message.author ||
-                        message.from ||
-                        null,
+                senderId:
+                    message.author ||
+                    message.from ||
+                    null,
 
-                    receiverId:
-                        message.to ||
-                        null,
+                receiverId:
+                    message.to ||
+                    null,
 
-                    body:
-                        String(
-                            message.body ||
-                            ''
-                        ),
+                body:
+                    String(
+                        message.body ||
+                        ''
+                    ),
 
-                    type:
-                        message.type ||
-                        'chat',
+                type:
+                    message.type ||
+                    'chat',
 
-                    timestamp:
-                        Number(
-                            message.timestamp ||
-                            0
-                        )
-                })
-            )
-            .sort(
-                (a, b) =>
-                    a.timestamp -
-                    b.timestamp
-            );
-
-    for (
-        const message of cleaned
-    ) {
-        if (accountNumber) {
-            await saveMessageToDatabase(
-                accountNumber,
-                message,
-                chatId
-            );
-        }
-    }
-
-    return cleaned;
+                timestamp:
+                    Number(
+                        message.timestamp ||
+                        0
+                    )
+            })
+        )
+        .sort(
+            (a, b) =>
+                a.timestamp -
+                b.timestamp
+        );
 }
 
 // =====================================================
-// AUTO REPLY
+// AUTO REPLIES
 // =====================================================
 
-async function getAutoReply(
+async function getAutoReplies(
     accountNumber
 ) {
     if (
         !db ||
         !accountNumber
     ) {
-        return {
-            enabled: false,
-            triggerText: 'START',
-            replyText: ''
-        };
+        return [];
     }
 
     try {
@@ -1265,57 +821,53 @@ async function getAutoReply(
             await db.execute(
                 `
                 SELECT
+                    id,
                     enabled,
                     trigger_text AS triggerText,
                     reply_text AS replyText
                 FROM auto_replies
                 WHERE account_number = ?
-                LIMIT 1
+                ORDER BY id ASC
                 `,
                 [accountNumber]
             );
 
-        if (!rows.length) {
-            return {
-                enabled: false,
-                triggerText: 'START',
-                replyText: ''
-            };
-        }
+        return rows.map(
+            row => ({
+                id:
+                    Number(
+                        row.id
+                    ),
 
-        return {
-            enabled:
-                Boolean(
-                    rows[0].enabled
-                ),
+                enabled:
+                    Boolean(
+                        row.enabled
+                    ),
 
-            triggerText:
-                String(
-                    rows[0].triggerText ||
-                    'START'
-                ),
+                triggerText:
+                    String(
+                        row.triggerText ||
+                        ''
+                    ),
 
-            replyText:
-                String(
-                    rows[0].replyText ||
-                    ''
-                )
-        };
+                replyText:
+                    String(
+                        row.replyText ||
+                        ''
+                    )
+            })
+        );
     } catch (error) {
         console.error(
-            'getAutoReply error:',
+            'getAutoReplies error:',
             error.message
         );
 
-        return {
-            enabled: false,
-            triggerText: 'START',
-            replyText: ''
-        };
+        return [];
     }
 }
 
-async function saveAutoReply(
+async function addAutoReply(
     accountNumber,
     settings
 ) {
@@ -1331,7 +883,7 @@ async function saveAutoReply(
     const triggerText =
         String(
             settings?.triggerText ||
-            'START'
+            ''
         ).trim();
 
     const replyText =
@@ -1343,8 +895,7 @@ async function saveAutoReply(
     const enabled =
         Boolean(
             settings?.enabled
-        ) &&
-        replyText.length > 0;
+        );
 
     if (!triggerText) {
         throw new Error(
@@ -1352,45 +903,146 @@ async function saveAutoReply(
         );
     }
 
+    if (!replyText) {
+        throw new Error(
+            'Response cannot be empty.'
+        );
+    }
+
+    if (
+        triggerText.length >
+        255
+    ) {
+        throw new Error(
+            'Trigger is too long.'
+        );
+    }
+
+    try {
+        await db.execute(
+            `
+            INSERT INTO auto_replies (
+                account_number,
+                enabled,
+                trigger_text,
+                reply_text
+            )
+            VALUES (?, ?, ?, ?)
+            `,
+            [
+                accountNumber,
+                enabled ? 1 : 0,
+                triggerText,
+                replyText
+            ]
+        );
+    } catch (error) {
+        if (
+            error?.code ===
+            'ER_DUP_ENTRY'
+        ) {
+            throw new Error(
+                `Auto reply for "${triggerText}" already exists.`
+            );
+        }
+
+        throw error;
+    }
+
+    return getAutoReplies(
+        accountNumber
+    );
+}
+
+async function toggleAutoReply(
+    accountNumber,
+    id,
+    enabled
+) {
+    if (
+        !db ||
+        !accountNumber
+    ) {
+        throw new Error(
+            'Database or WhatsApp account is unavailable.'
+        );
+    }
+
+    const autoReplyId =
+        Number(id);
+
+    if (
+        !Number.isInteger(
+            autoReplyId
+        ) ||
+        autoReplyId <= 0
+    ) {
+        throw new Error(
+            'Invalid auto reply ID.'
+        );
+    }
+
     await db.execute(
         `
-        INSERT INTO auto_replies (
-            account_number,
-            enabled,
-            trigger_text,
-            reply_text
-        )
-        VALUES (?, ?, ?, ?)
-
-        ON DUPLICATE KEY UPDATE
-            enabled =
-                VALUES(enabled),
-
-            trigger_text =
-                VALUES(trigger_text),
-
-            reply_text =
-                VALUES(reply_text),
-
-            updated_at =
-                NOW()
+        UPDATE auto_replies
+        SET enabled = ?
+        WHERE id = ?
+          AND account_number = ?
         `,
         [
-            accountNumber,
-
             enabled ? 1 : 0,
-
-            triggerText,
-
-            replyText
+            autoReplyId,
+            accountNumber
         ]
     );
 
-    return {
-        enabled,
-        triggerText,
-        replyText
-    };
+    return getAutoReplies(
+        accountNumber
+    );
+}
+
+async function deleteAutoReply(
+    accountNumber,
+    id
+) {
+    if (
+        !db ||
+        !accountNumber
+    ) {
+        throw new Error(
+            'Database or WhatsApp account is unavailable.'
+        );
+    }
+
+    const autoReplyId =
+        Number(id);
+
+    if (
+        !Number.isInteger(
+            autoReplyId
+        ) ||
+        autoReplyId <= 0
+    ) {
+        throw new Error(
+            'Invalid auto reply ID.'
+        );
+    }
+
+    await db.execute(
+        `
+        DELETE FROM auto_replies
+        WHERE id = ?
+          AND account_number = ?
+        `,
+        [
+            autoReplyId,
+            accountNumber
+        ]
+    );
+
+    return getAutoReplies(
+        accountNumber
+    );
 }
 
 // =====================================================
@@ -1404,32 +1056,31 @@ const authPath =
         '.wwebjs_auth'
     );
 
-const client = new Client({
-    authStrategy:
-        new LocalAuth({
-            dataPath:
-                authPath
-        }),
+const client =
+    new Client({
+        authStrategy:
+            new LocalAuth({
+                dataPath:
+                    authPath
+            }),
 
-    puppeteer: {
-        executablePath:
-            process.env
-                .PUPPETEER_EXECUTABLE_PATH ||
-            undefined,
+        puppeteer: {
+            executablePath:
+                process.env
+                    .PUPPETEER_EXECUTABLE_PATH ||
+                undefined,
 
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote'
-        ]
-    }
-});
-
-let whatsappReady = false;
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote'
+            ]
+        }
+    });
 
 // =====================================================
 // SOCKET.IO
@@ -1461,10 +1112,6 @@ io.on(
                 session.account_number ||
                 null;
 
-            // -----------------------------------------
-            // Give browser its persistent session token
-            // -----------------------------------------
-
             socket.emit(
                 'session',
                 {
@@ -1477,35 +1124,11 @@ io.on(
                 }
             );
 
-            // -----------------------------------------
-            // Restore saved chats immediately
-            // -----------------------------------------
+            // ---------------------------------------------
+            // WHATSAPP ALREADY READY
+            // ---------------------------------------------
 
-            if (
-                session.account_number
-            ) {
-                const savedChats =
-                    await getStoredChats(
-                        session.account_number
-                    );
-
-                if (
-                    savedChats.length
-                ) {
-                    socket.emit(
-                        'chats',
-                        savedChats
-                    );
-                }
-            }
-
-            // -----------------------------------------
-            // WhatsApp is already ready
-            // -----------------------------------------
-
-            if (
-                whatsappReady
-            ) {
+            if (whatsappReady) {
                 const accountNumber =
                     getAccountNumber();
 
@@ -1521,23 +1144,24 @@ io.on(
                     'ready',
                     {
                         accountNumber,
+
                         pushName:
                             client.info?.pushname ||
                             'WhatsApp'
                     }
                 );
 
-                const autoReply =
-                    await getAutoReply(
+                const replies =
+                    await getAutoReplies(
                         accountNumber
                     );
 
                 socket.emit(
-                    'autoReply',
-                    autoReply
+                    'autoReplies',
+                    replies
                 );
 
-                await sendChats(
+                await sendLiveChats(
                     socket
                 );
             } else {
@@ -1570,7 +1194,7 @@ io.on(
                         socket.data.sessionToken
                     );
 
-                    await sendChats(
+                    await sendLiveChats(
                         socket
                     );
                 } catch (error) {
@@ -1589,6 +1213,8 @@ io.on(
 
         // =================================================
         // GET MESSAGES
+        //
+        // LIVE ONLY
         // =================================================
 
         socket.on(
@@ -1612,31 +1238,17 @@ io.on(
                         return;
                     }
 
-                    const accountNumber =
-                        getAccountNumber() ||
-                        socket.data.accountNumber;
-
-                    if (
-                        !accountNumber
-                    ) {
+                    if (!whatsappReady) {
                         socket.emit(
                             'messagesError',
-                            'WhatsApp account is not connected.'
+                            'WhatsApp is not ready.'
                         );
 
                         return;
                     }
 
-                    socket.data.accountNumber =
-                        accountNumber;
-
-                    // --------------------------------
-                    // FIRST: load database messages
-                    // --------------------------------
-
-                    const savedMessages =
-                        await getStoredMessages(
-                            accountNumber,
+                    const messages =
+                        await fetchMessagesForChat(
                             chatId
                         );
 
@@ -1644,51 +1256,13 @@ io.on(
                         'messages',
                         {
                             chatId,
-
-                            messages:
-                                savedMessages
+                            messages
                         }
                     );
-
-                    // --------------------------------
-                    // SECOND: fetch live messages
-                    // --------------------------------
-
-                    if (
-                        !whatsappReady
-                    ) {
-                        return;
-                    }
-
-                    try {
-                        const liveMessages =
-                            await fetchMessagesForChat(
-                                accountNumber,
-                                chatId
-                            );
-
-                        socket.emit(
-                            'messages',
-                            {
-                                chatId,
-
-                                messages:
-                                    liveMessages
-                            }
-                        );
-                    } catch (error) {
-                        console.error(
-                            'Live message fetch failed:',
-                            error.message
-                        );
-
-                        // The stored messages
-                        // were already sent.
-                    }
                 } catch (error) {
                     console.error(
                         'getMessages error:',
-                        error
+                        error.message
                     );
 
                     socket.emit(
@@ -1700,11 +1274,11 @@ io.on(
         );
 
         // =================================================
-        // GET AUTO REPLY
+        // GET AUTO REPLIES
         // =================================================
 
         socket.on(
-            'getAutoReply',
+            'getAutoReplies',
             async () => {
                 try {
                     const accountNumber =
@@ -1715,40 +1289,23 @@ io.on(
                         !accountNumber
                     ) {
                         socket.emit(
-                            'autoReply',
-                            {
-                                enabled:
-                                    false,
-
-                                triggerText:
-                                    'START',
-
-                                replyText:
-                                    ''
-                            }
+                            'autoReplies',
+                            []
                         );
 
                         return;
                     }
 
-                    socket.data.accountNumber =
-                        accountNumber;
-
-                    const settings =
-                        await getAutoReply(
+                    const replies =
+                        await getAutoReplies(
                             accountNumber
                         );
 
                     socket.emit(
-                        'autoReply',
-                        settings
+                        'autoReplies',
+                        replies
                     );
                 } catch (error) {
-                    console.error(
-                        'getAutoReply socket error:',
-                        error.message
-                    );
-
                     socket.emit(
                         'autoReplyError',
                         error.message
@@ -1758,11 +1315,11 @@ io.on(
         );
 
         // =================================================
-        // SAVE AUTO REPLY
+        // ADD AUTO REPLY
         // =================================================
 
         socket.on(
-            'saveAutoReply',
+            'addAutoReply',
             async settings => {
                 try {
                     const accountNumber =
@@ -1780,29 +1337,28 @@ io.on(
                         return;
                     }
 
-                    socket.data.accountNumber =
-                        accountNumber;
-
-                    const saved =
-                        await saveAutoReply(
+                    const replies =
+                        await addAutoReply(
                             accountNumber,
                             settings
                         );
 
                     socket.emit(
-                        'autoReply',
-                        saved
+                        'autoReplies',
+                        replies
+                    );
+
+                    socket.emit(
+                        'autoReplySaved'
                     );
 
                     socket.emit(
                         'message',
-                        saved.enabled
-                            ? `Auto reply enabled for "${saved.triggerText}".`
-                            : 'Auto reply disabled.'
+                        `Auto reply "${settings?.triggerText || ''}" added.`
                     );
                 } catch (error) {
                     console.error(
-                        'saveAutoReply socket error:',
+                        'addAutoReply error:',
                         error.message
                     );
 
@@ -1813,6 +1369,105 @@ io.on(
                 }
             }
         );
+
+        // =================================================
+        // TOGGLE AUTO REPLY
+        // =================================================
+
+        socket.on(
+            'toggleAutoReply',
+            async data => {
+                try {
+                    const accountNumber =
+                        getAccountNumber() ||
+                        socket.data.accountNumber;
+
+                    if (
+                        !accountNumber
+                    ) {
+                        socket.emit(
+                            'autoReplyError',
+                            'WhatsApp account is not connected.'
+                        );
+
+                        return;
+                    }
+
+                    const replies =
+                        await toggleAutoReply(
+                            accountNumber,
+                            data?.id,
+                            data?.enabled
+                        );
+
+                    socket.emit(
+                        'autoReplies',
+                        replies
+                    );
+                } catch (error) {
+                    console.error(
+                        'toggleAutoReply error:',
+                        error.message
+                    );
+
+                    socket.emit(
+                        'autoReplyError',
+                        error.message
+                    );
+                }
+            }
+        );
+
+        // =================================================
+        // DELETE AUTO REPLY
+        // =================================================
+
+        socket.on(
+            'deleteAutoReply',
+            async id => {
+                try {
+                    const accountNumber =
+                        getAccountNumber() ||
+                        socket.data.accountNumber;
+
+                    if (
+                        !accountNumber
+                    ) {
+                        socket.emit(
+                            'autoReplyError',
+                            'WhatsApp account is not connected.'
+                        );
+
+                        return;
+                    }
+
+                    const replies =
+                        await deleteAutoReply(
+                            accountNumber,
+                            id
+                        );
+
+                    socket.emit(
+                        'autoReplies',
+                        replies
+                    );
+                } catch (error) {
+                    console.error(
+                        'deleteAutoReply error:',
+                        error.message
+                    );
+
+                    socket.emit(
+                        'autoReplyError',
+                        error.message
+                    );
+                }
+            }
+        );
+
+        // =================================================
+        // DISCONNECT
+        // =================================================
 
         socket.on(
             'disconnect',
@@ -1827,85 +1482,33 @@ io.on(
 );
 
 // =====================================================
-// SEND CHATS
+// SEND LIVE CHATS
 // =====================================================
 
-async function sendChats(
+async function sendLiveChats(
     socket
 ) {
-    const accountNumber =
-        getAccountNumber() ||
-        socket.data.accountNumber ||
-        null;
-
-    // ---------------------------------------------
-    // Always show saved chats first
-    // ---------------------------------------------
-
-    if (accountNumber) {
-        const stored =
-            await getStoredChats(
-                accountNumber
-            );
-
-        if (
-            stored.length
-        ) {
-            socket.emit(
-                'chats',
-                stored
-            );
-        }
-    }
-
-    // ---------------------------------------------
-    // Then fetch live chats
-    // ---------------------------------------------
-
     if (!whatsappReady) {
         return;
     }
 
     try {
-        const liveChats =
+        const chats =
             await getRecentChatsDirect();
 
-        console.log(
-            `Found ${liveChats.length} recent chats.`
+        socket.emit(
+            'chats',
+            chats
         );
-
-        if (accountNumber) {
-            await saveRecentChats(
-                accountNumber,
-                liveChats
-            );
-
-            const latest =
-                await getStoredChats(
-                    accountNumber
-                );
-
-            socket.emit(
-                'chats',
-                latest.length
-                    ? latest
-                    : liveChats
-            );
-        } else {
-            socket.emit(
-                'chats',
-                liveChats
-            );
-        }
 
         socket.emit(
             'message',
-            `Loaded ${liveChats.length} recent chats.`
+            `Loaded ${chats.length} recent chats.`
         );
     } catch (error) {
         console.error(
-            'Live recent-chat fetch failed:',
-            error
+            'Live chat fetch failed:',
+            error.message
         );
 
         socket.emit(
@@ -1965,7 +1568,7 @@ client.on(
 
         io.emit(
             'message',
-            'Authenticated successfully. Loading...'
+            'WhatsApp authenticated.'
         );
     }
 );
@@ -1977,7 +1580,8 @@ client.on(
 client.on(
     'auth_failure',
     error => {
-        whatsappReady = false;
+        whatsappReady =
+            false;
 
         console.error(
             'WhatsApp authentication failure:',
@@ -1998,13 +1602,14 @@ client.on(
 client.on(
     'ready',
     async () => {
-        whatsappReady = true;
+        whatsappReady =
+            true;
 
         const accountNumber =
             getAccountNumber();
 
         console.log(
-            '===================================='
+            '======================================'
         );
 
         console.log(
@@ -2017,16 +1622,18 @@ client.on(
         );
 
         console.log(
-            '===================================='
+            '======================================'
         );
 
-        /*
-         * Update every currently connected
-         * browser session with this account.
-         */
+        // ---------------------------------------------
+        // Attach current WhatsApp account to sessions
+        // ---------------------------------------------
+
         for (
-            const [socketId, socket]
-            of io.sockets.sockets
+            const [
+                ,
+                socket
+            ] of io.sockets.sockets
         ) {
             socket.data.accountNumber =
                 accountNumber;
@@ -2048,139 +1655,99 @@ client.on(
             }
         );
 
-        // Load auto-reply configuration
-        if (
-            accountNumber
-        ) {
-            const settings =
-                await getAutoReply(
+        // ---------------------------------------------
+        // Send auto replies
+        // ---------------------------------------------
+
+        if (accountNumber) {
+            const replies =
+                await getAutoReplies(
                     accountNumber
                 );
 
             io.emit(
-                'autoReply',
-                settings
+                'autoReplies',
+                replies
             );
         }
 
-        io.emit(
-            'message',
-            'WhatsApp connected. Fetching recent chats...'
-        );
+        // ---------------------------------------------
+        // Load LIVE chats
+        // ---------------------------------------------
 
         try {
-            const liveChats =
+            const chats =
                 await getRecentChatsDirect();
-
-            await saveRecentChats(
-                accountNumber,
-                liveChats
-            );
-
-            const stored =
-                await getStoredChats(
-                    accountNumber
-                );
 
             io.emit(
                 'chats',
-                stored.length
-                    ? stored
-                    : liveChats
+                chats
             );
 
             io.emit(
                 'message',
-                `Loaded ${liveChats.length} recent chats.`
+                `Loaded ${chats.length} recent chats.`
             );
         } catch (error) {
             console.error(
                 'Ready chat fetch error:',
-                error
+                error.message
             );
-
-            const stored =
-                await getStoredChats(
-                    accountNumber
-                );
-
-            if (
-                stored.length
-            ) {
-                io.emit(
-                    'chats',
-                    stored
-                );
-            }
 
             io.emit(
                 'message',
-                `Could not refresh live chats: ${error.message}`
+                `Could not load chats: ${error.message}`
             );
         }
     }
 );
 
 // =====================================================
-// NEW MESSAGE
+// MESSAGE CREATED
 //
-// Also stores incoming/outgoing messages.
+// ONLY NOTIFY FRONTEND.
+// NO DATABASE.
+//
+// This is for refreshing the chat/messages UI.
 // =====================================================
 
 client.on(
     'message_create',
     async message => {
         try {
-            const accountNumber =
-                getAccountNumber();
-
-            if (
-                !accountNumber ||
-                !message
-            ) {
-                return;
-            }
-
             const chatId =
-                message.fromMe
+                message?.fromMe
                     ? message.to
-                    : message.from;
+                    : message?.from;
 
-            if (
-                !chatId
-            ) {
+            if (!chatId) {
                 return;
             }
 
-            const saved =
-                await saveMessageToDatabase(
-                    accountNumber,
-                    message,
-                    chatId
-                );
-
-            if (
-                saved
-            ) {
-                io.emit(
-                    'newMessage',
-                    saved
-                );
-            }
-        } catch (error) {
-            console.error(
-                'message_create error:',
-                error
+            io.emit(
+                'newMessage',
+                {
+                    chatId:
+                        String(
+                            chatId
+                        )
+                }
             );
-        }
+        } catch (_) {}
     }
 );
 
 // =====================================================
-// AUTO REPLY
+// MULTIPLE AUTO REPLIES
 //
-// Incoming individual users only.
-// Groups are ignored.
+// RULES:
+// - incoming only
+// - individual users only
+// - groups ignored
+// - trigger must match exactly
+// - case insensitive
+// - first matching enabled rule replies
+// - nothing saved to message DB
 // =====================================================
 
 client.on(
@@ -2201,16 +1768,11 @@ client.on(
                     ''
                 );
 
-            if (
-                !chatId
-            ) {
+            if (!chatId) {
                 return;
             }
 
-            // -----------------------------------------
-            // NEVER AUTO-REPLY TO GROUPS
-            // -----------------------------------------
-
+            // Ignore groups
             if (
                 chatId.endsWith(
                     '@g.us'
@@ -2219,10 +1781,7 @@ client.on(
                 return;
             }
 
-            // -----------------------------------------
-            // Individuals can be @c.us OR @lid
-            // -----------------------------------------
-
+            // Only individual users
             const isIndividual =
                 chatId.endsWith(
                     '@c.us'
@@ -2231,88 +1790,82 @@ client.on(
                     '@lid'
                 );
 
-            if (
-                !isIndividual
-            ) {
+            if (!isIndividual) {
                 return;
             }
 
             const accountNumber =
                 getAccountNumber();
 
-            if (
-                !accountNumber
-            ) {
+            if (!accountNumber) {
                 return;
             }
 
-            const settings =
-                await getAutoReply(
+            const replies =
+                await getAutoReplies(
                     accountNumber
                 );
 
             if (
-                !settings.enabled
-            ) {
-                return;
-            }
-
-            if (
-                !settings.replyText
+                !replies.length
             ) {
                 return;
             }
 
             const receivedText =
                 String(
-                    message.body ||
-                    ''
-                ).trim();
+                    message.body || ''
+                )
+                    .trim()
+                    .toLowerCase();
 
-            const triggerText =
-                String(
-                    settings.triggerText ||
-                    'START'
-                ).trim();
-
-            if (
-                !receivedText ||
-                !triggerText
-            ) {
+            if (!receivedText) {
                 return;
             }
 
-            /*
-             * Exact match,
-             * case-insensitive.
-             *
-             * START
-             * start
-             * Start
-             *
-             * all match.
-             */
-
-            if (
-                receivedText.toLowerCase() !==
-                triggerText.toLowerCase()
+            for (
+                const rule
+                of replies
             ) {
-                return;
+                if (
+                    !rule.enabled
+                ) {
+                    continue;
+                }
+
+                const trigger =
+                    String(
+                        rule.triggerText ||
+                        ''
+                    )
+                        .trim()
+                        .toLowerCase();
+
+                if (!trigger) {
+                    continue;
+                }
+
+                if (
+                    receivedText ===
+                    trigger
+                ) {
+                    console.log(
+                        `AUTO REPLY: "${rule.triggerText}" -> ${chatId}`
+                    );
+
+                    await message.reply(
+                        rule.replyText
+                    );
+
+                    console.log(
+                        `AUTO REPLY SENT -> ${chatId}`
+                    );
+
+                    // Only one reply
+                    // per received message.
+                    break;
+                }
             }
-
-            console.log(
-                'AUTO REPLY MATCH:',
-                chatId
-            );
-
-            await message.reply(
-                settings.replyText
-            );
-
-            console.log(
-                'AUTO REPLY SENT:',
-                chatId
-            );
         } catch (error) {
             console.error(
                 'AUTO REPLY ERROR:',
@@ -2329,7 +1882,8 @@ client.on(
 client.on(
     'disconnected',
     reason => {
-        whatsappReady = false;
+        whatsappReady =
+            false;
 
         console.log(
             'WhatsApp disconnected:',
@@ -2356,8 +1910,10 @@ client.on(
 // =====================================================
 
 async function start() {
+    // Create DB tables automatically
     await initDatabase();
 
+    // Start WhatsApp
     client.initialize()
         .catch(
             error => {
@@ -2368,6 +1924,7 @@ async function start() {
             }
         );
 
+    // Start HTTP server
     server.listen(
         PORT,
         () => {

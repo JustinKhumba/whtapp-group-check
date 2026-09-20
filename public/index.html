@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WhatsApp Railway Test</title>
+  <title>WhatsApp Web Integration</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Socket.io client script is automatically served by the socket.io backend -->
@@ -55,61 +55,64 @@
 
   <script>
     const socket = io();
-    const statusMsg = document.getElementById('status-message');
+    const statusMessage = document.getElementById('status-message');
     const qrContainer = document.getElementById('qr-container');
     const qrImage = document.getElementById('qr-image');
     const chatsContainer = document.getElementById('chats-container');
     const chatsList = document.getElementById('chats-list');
     const chatCount = document.getElementById('chat-count');
 
-    // Handle generic status messages
-    socket.on('message', (msg) => {
-        statusMsg.textContent = msg;
-        statusMsg.className = "mb-6 p-4 bg-blue-50 text-blue-700 rounded-xl border border-blue-100 font-medium text-sm transition-all duration-300";
+    socket.on('connect', () => {
+        statusMessage.textContent = 'Connected to Server. Waiting for WhatsApp...';
+        statusMessage.className = 'mb-6 p-4 bg-yellow-50 text-yellow-800 rounded-xl border border-yellow-200 font-medium text-sm transition-all duration-300';
     });
 
-    // Handle incoming QR code
+    socket.on('disconnect', () => {
+        statusMessage.textContent = 'Disconnected from Server.';
+        statusMessage.className = 'mb-6 p-4 bg-red-50 text-red-700 rounded-xl border border-red-100 font-medium text-sm transition-all duration-300';
+    });
+
+    socket.on('message', (msg) => {
+        statusMessage.textContent = msg;
+        // Keep it styled as an info message unless it's a specific success/fail
+        if(msg.includes('Failed') || msg.includes('Error')) {
+             statusMessage.className = 'mb-6 p-4 bg-red-50 text-red-700 rounded-xl border border-red-100 font-medium text-sm transition-all duration-300';
+        } else {
+             statusMessage.className = 'mb-6 p-4 bg-blue-50 text-blue-700 rounded-xl border border-blue-100 font-medium text-sm transition-all duration-300';
+        }
+    });
+
     socket.on('qr', (url) => {
-        qrImage.src = url;
         qrContainer.classList.remove('hidden');
         chatsContainer.classList.add('hidden');
-        
-        statusMsg.textContent = "Scan the QR code below";
-        statusMsg.className = "mb-6 p-4 bg-amber-50 text-amber-700 rounded-xl border border-amber-100 font-medium text-sm transition-all duration-300";
+        qrImage.src = url;
+        statusMessage.textContent = 'Scan the QR Code to login.';
+        statusMessage.className = 'mb-6 p-4 bg-indigo-50 text-indigo-700 rounded-xl border border-indigo-100 font-medium text-sm transition-all duration-300';
     });
 
-    // Handle successful WhatsApp login
     socket.on('ready', (msg) => {
-        statusMsg.textContent = msg;
-        statusMsg.className = "mb-6 p-4 bg-green-50 text-green-700 rounded-xl border border-green-100 font-medium text-sm transition-all duration-300";
         qrContainer.classList.add('hidden');
         chatsContainer.classList.remove('hidden');
+        statusMessage.textContent = msg;
+        statusMessage.className = 'mb-6 p-4 bg-green-50 text-green-700 rounded-xl border border-green-100 font-medium text-sm transition-all duration-300';
     });
 
-    // Handle incoming chat list data
     socket.on('chats', (chats) => {
         chatCount.textContent = chats.length;
-        chatsList.innerHTML = ''; // Clear loading text
+        chatsList.innerHTML = '';
+        
+        if(chats.length === 0) {
+            chatsList.innerHTML = '<li class="p-4 text-center text-slate-500 text-sm">No chats found.</li>';
+            return;
+        }
 
         chats.forEach(chat => {
             const li = document.createElement('li');
-            li.className = "p-3 bg-white mb-1 rounded-lg hover:bg-slate-100 transition-colors flex justify-between items-center cursor-default";
-            
-            const nameSpan = document.createElement('span');
-            nameSpan.className = "font-medium text-slate-700 truncate mr-2";
-            nameSpan.textContent = chat.name || "Unknown";
-            
-            const badgeContainer = document.createElement('div');
-            
-            if(chat.unread > 0) {
-                const unreadBadge = document.createElement('span');
-                unreadBadge.className = "bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-sm";
-                unreadBadge.textContent = chat.unread > 99 ? '99+' : chat.unread;
-                badgeContainer.appendChild(unreadBadge);
-            }
-
-            li.appendChild(nameSpan);
-            li.appendChild(badgeContainer);
+            li.className = 'p-3 hover:bg-slate-100 cursor-pointer transition-colors flex justify-between items-center';
+            li.innerHTML = `
+                <span class="font-medium text-slate-700 truncate pr-2">${chat.name || 'Unknown'}</span>
+                ${chat.unread ? `<span class="bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full shrink-0 shadow-sm">${chat.unread}</span>` : ''}
+            `;
             chatsList.appendChild(li);
         });
     });

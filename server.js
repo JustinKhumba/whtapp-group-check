@@ -17,7 +17,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Add global error handlers to prevent the entire server from crashing
 process.on('unhandledRejection', error => {
     console.error('Unhandled Promise Rejection:', error);
 });
@@ -25,11 +24,11 @@ process.on('uncaughtException', error => {
     console.error('Uncaught Exception:', error);
 });
 
-// LocalAuth saves the session locally so you don't have to scan the QR code on every server restart
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
-        // Additional flags to save memory and ensure compatibility inside Docker/Railway
+        // CRITICAL FOR RAILWAY: Use the Chromium path provided by Nixpacks, if available
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox', 
@@ -37,7 +36,7 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--single-process', // heavily reduces memory usage
+            '--single-process', // Heavily reduces memory usage
             '--disable-gpu'
         ]
     }
@@ -53,7 +52,6 @@ io.on('connection', (socket) => {
     }
 });
 
-// Triggered when a new QR code needs to be scanned
 client.on('qr', (qr) => {
     console.log('QR Code generated. Waiting for scan...');
     // Convert raw QR string to a base64 image URL to show on the frontend
@@ -82,7 +80,7 @@ client.on('disconnected', (reason) => {
 
 client.on('ready', async () => {
     console.log('WhatsApp Client is ready!');
-    io.emit('ready', `WhatsApp is ready! Connected as ${client.info.pushname || 'User'}`);
+    io.emit('ready', `WhatsApp is ready! Connected as ${client.info?.pushname || 'User'}`);
     io.emit('message', 'Fetching chats...');
 
     try {
@@ -104,7 +102,11 @@ client.on('ready', async () => {
     }
 });
 
-client.initialize();
+// Catch any initialization errors so they don't crash the Node process
+client.initialize().catch(err => {
+    console.error("Failed to initialize WhatsApp client:", err);
+    io.emit('message', `Startup Error: ${err.message}. Check Server Logs.`);
+});
 
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);

@@ -60,45 +60,82 @@ client.on('ready', async () => {
     io.emit('ready', 'WhatsApp is ready! Fetching recent chats...');
 
     try {
-        const recentChats = await client.pupPage.evaluate(() => {
-            const chatModels = window.require('WAWebCollections').Chat.getModelsArray();
-            
-            return chatModels.map(chat => {
-                // 1. Safe ID extraction
-                let id = null;
-                if (chat.id) {
-                    if (chat.id._serialized) {
-                        id = chat.id._serialized;
-                    } else if (chat.id.$1) {
-                        id = chat.id.$1;
-                    } else if (chat.id.user && chat.id.server) {
-                        id = `${chat.id.user}@${chat.id.server}`;
+        const result = await client.pupPage.evaluate(() => {
+            try {
+                let chatModels = [];
+
+                // 1. Attempt the requested WAWebCollections method safely
+                if (typeof window.require === 'function') {
+                    try {
+                        const WAWebCollections = window.require('WAWebCollections');
+                        if (WAWebCollections && WAWebCollections.Chat) {
+                            chatModels = WAWebCollections.Chat.getModelsArray();
+                        }
+                    } catch (e) {
+                        // If window.require fails, ignore and move to fallback
                     }
                 }
 
-                // 2. Safe Name extraction based on priority
-                let name = 'Unknown';
-                if (chat.formattedTitle) {
-                    name = chat.formattedTitle;
-                } else if (chat.name) {
-                    name = chat.name;
-                } else if (chat.id && chat.id.user) {
-                    name = chat.id.user;
+                // 2. Safe Fallback: WWebJS automatically injects window.Store when 'ready' is fired.
+                // This guarantees we get chats even if Meta removed window.require in your WhatsApp version.
+                if ((!chatModels || chatModels.length === 0) && typeof window.Store !== 'undefined' && window.Store.Chat) {
+                    chatModels = window.Store.Chat.getModelsArray();
                 }
 
-                // 3. Return serialized data
-                return {
-                    name: name,
-                    id: id,
-                    unread: Number(chat.unreadCount || 0),
-                    timestamp: Number(chat.t || 0)
-                };
-            })
-            .filter(chat => chat.id) // Filter out invalid chats to prevent crashes
-            .sort((a, b) => b.timestamp - a.timestamp) // Sort by newest timestamp
-            .slice(0, 50); // Keep only the newest 50
+                if (!chatModels || !Array.isArray(chatModels)) {
+                    return { error: 'Could not locate WhatsApp chat models (window.require and window.Store are both unavailable).' };
+                }
+
+                const parsedChats = chatModels.map(chat => {
+                    // 1. Extremely Safe ID extraction
+                    let id = null;
+                    if (chat.id) {
+                        if (typeof chat.id === 'string') {
+                            id = chat.id;
+                        } else if (typeof chat.id === 'object') {
+                            if (chat.id._serialized) id = String(chat.id._serialized);
+                            else if (chat.id.$1) id = String(chat.id.$1);
+                            else if (chat.id.user && chat.id.server) id = `${chat.id.user}@${chat.id.server}`;
+                        }
+                    }
+
+                    // 2. Extremely Safe Name extraction
+                    let name = 'Unknown';
+                    if (typeof chat.formattedTitle === 'string' && chat.formattedTitle) {
+                        name = chat.formattedTitle;
+                    } else if (typeof chat.name === 'string' && chat.name) {
+                        name = chat.name;
+                    } else if (chat.id && typeof chat.id === 'object' && chat.id.user) {
+                        name = String(chat.id.user);
+                    } else if (typeof chat.id === 'string') {
+                        name = chat.id;
+                    }
+
+                    // 3. Return plain serializable data
+                    return {
+                        name: name,
+                        id: id,
+                        unread: Number(chat.unreadCount || 0),
+                        timestamp: Number(chat.t || 0)
+                    };
+                })
+                .filter(chat => chat.id) // Filter out invalid chats
+                .sort((a, b) => b.timestamp - a.timestamp) // Sort by newest timestamp
+                .slice(0, 50); // Keep only the newest 50
+
+                return { data: parsedChats };
+            } catch (err) {
+                // Catch internal browser errors and pass them back as text
+                return { error: 'Browser error: ' + err.toString() };
+            }
         });
 
+        // Check if the browser evaluation returned a managed error
+        if (result.error) {
+            throw new Error(result.error);
+        }
+
+        const recentChats = result.data;
         console.log(`Found ${recentChats.length} recent chats`);
         io.emit('chats', recentChats);
         io.emit('message', `Successfully loaded ${recentChats.length} recent chats.`);

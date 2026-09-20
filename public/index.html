@@ -3,10 +3,116 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Railway App</title>
+  <title>WhatsApp Railway Test</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Socket.io client script is automatically served by the socket.io backend -->
+  <script src="/socket.io/socket.io.js"></script>
+  
+  <style>
+    /* Custom scrollbar for chat list */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
 </head>
-<body>
-  <h1>Server is successfully running!</h1>
-  <p>This is a basic website served via Express.</p>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex items-center justify-center p-4">
+
+  <div class="max-w-md w-full bg-white p-8 rounded-2xl shadow-lg border border-slate-100">
+    
+    <div class="flex items-center space-x-3 mb-6">
+        <div class="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center shadow-sm text-white font-bold text-xl">
+            W
+        </div>
+        <h1 class="text-2xl font-bold text-slate-800">WhatsApp Test</h1>
+    </div>
+    
+    <!-- Status Banner -->
+    <div id="status-message" class="mb-6 p-4 bg-blue-50 text-blue-700 rounded-xl border border-blue-100 font-medium text-sm transition-all duration-300">
+        Connecting to Server...
+    </div>
+
+    <!-- QR Code Section -->
+    <div id="qr-container" class="hidden flex flex-col items-center animate-fade-in">
+        <p class="text-sm text-slate-500 mb-4 text-center">Open WhatsApp on your phone -> Settings -> Linked Devices -> Link a Device</p>
+        <div class="bg-white p-3 rounded-xl shadow-sm border border-slate-100">
+            <img id="qr-image" src="" alt="Scan this QR Code" class="w-48 h-48 object-contain">
+        </div>
+    </div>
+
+    <!-- Chats Section -->
+    <div id="chats-container" class="hidden animate-fade-in">
+        <div class="flex justify-between items-end mb-3 px-1">
+            <h2 class="text-lg font-semibold text-slate-700">Recent Chats</h2>
+            <span class="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md"><span id="chat-count">0</span> Total</span>
+        </div>
+        <ul id="chats-list" class="divide-y divide-slate-100 h-80 overflow-y-auto border border-slate-100 rounded-xl bg-slate-50 shadow-inner p-1">
+            <!-- Chats injected here via JS -->
+        </ul>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    const statusMsg = document.getElementById('status-message');
+    const qrContainer = document.getElementById('qr-container');
+    const qrImage = document.getElementById('qr-image');
+    const chatsContainer = document.getElementById('chats-container');
+    const chatsList = document.getElementById('chats-list');
+    const chatCount = document.getElementById('chat-count');
+
+    // Handle generic status messages
+    socket.on('message', (msg) => {
+        statusMsg.textContent = msg;
+        statusMsg.className = "mb-6 p-4 bg-blue-50 text-blue-700 rounded-xl border border-blue-100 font-medium text-sm transition-all duration-300";
+    });
+
+    // Handle incoming QR code
+    socket.on('qr', (url) => {
+        qrImage.src = url;
+        qrContainer.classList.remove('hidden');
+        chatsContainer.classList.add('hidden');
+        
+        statusMsg.textContent = "Scan the QR code below";
+        statusMsg.className = "mb-6 p-4 bg-amber-50 text-amber-700 rounded-xl border border-amber-100 font-medium text-sm transition-all duration-300";
+    });
+
+    // Handle successful WhatsApp login
+    socket.on('ready', (msg) => {
+        statusMsg.textContent = msg;
+        statusMsg.className = "mb-6 p-4 bg-green-50 text-green-700 rounded-xl border border-green-100 font-medium text-sm transition-all duration-300";
+        qrContainer.classList.add('hidden');
+        chatsContainer.classList.remove('hidden');
+    });
+
+    // Handle incoming chat list data
+    socket.on('chats', (chats) => {
+        chatCount.textContent = chats.length;
+        chatsList.innerHTML = ''; // Clear loading text
+
+        chats.forEach(chat => {
+            const li = document.createElement('li');
+            li.className = "p-3 bg-white mb-1 rounded-lg hover:bg-slate-100 transition-colors flex justify-between items-center cursor-default";
+            
+            const nameSpan = document.createElement('span');
+            nameSpan.className = "font-medium text-slate-700 truncate mr-2";
+            nameSpan.textContent = chat.name || "Unknown";
+            
+            const badgeContainer = document.createElement('div');
+            
+            if(chat.unread > 0) {
+                const unreadBadge = document.createElement('span');
+                unreadBadge.className = "bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-sm";
+                unreadBadge.textContent = chat.unread > 99 ? '99+' : chat.unread;
+                badgeContainer.appendChild(unreadBadge);
+            }
+
+            li.appendChild(nameSpan);
+            li.appendChild(badgeContainer);
+            chatsList.appendChild(li);
+        });
+    });
+  </script>
 </body>
 </html>

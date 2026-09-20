@@ -11,7 +11,9 @@
 "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main",
 "puppeteer": "^22.7.1",
 "socket.io": "^4.7.5",
-"qrcode": "^1.5.3"
+"qrcode": "^1.5.3",
+"mysql2": "^3.11.0",
+"adm-zip": "^0.5.15"
 },
 "engines": {
 "node": ">=18.0.0"

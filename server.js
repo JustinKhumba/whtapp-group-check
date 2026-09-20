@@ -17,8 +17,18 @@ const PORT = Number(process.env.PORT || 3000);
 const CHAT_LIMIT = 50;
 const MESSAGE_LIMIT = 100;
 
+// =====================================================
+// STATE
+// =====================================================
+
 let db = null;
 let whatsappReady = false;
+
+// IMPORTANT:
+// Keep the latest QR in memory.
+// If QR is generated before browser connects,
+// browser can still receive it afterward.
+let latestQr = null;
 
 // =====================================================
 // EXPRESS
@@ -67,16 +77,7 @@ process.on(
 );
 
 // =====================================================
-// MYSQL
-//
-// ONLY SAVED IN DATABASE:
-// 1. Browser session token
-// 2. Multiple auto replies
-//
-// NOT SAVED:
-// - recent chats
-// - messages
-// - message history
+// MYSQL CONNECTION
 // =====================================================
 
 function createDatabasePool() {
@@ -116,14 +117,11 @@ function createDatabasePool() {
 
             charset: 'utf8mb4',
 
-            waitForConnections:
-                true,
+            waitForConnections: true,
 
-            connectionLimit:
-                10,
+            connectionLimit: 10,
 
-            queueLimit:
-                0
+            queueLimit: 0
         });
     }
 
@@ -153,19 +151,27 @@ function createDatabasePool() {
 
         charset: 'utf8mb4',
 
-        waitForConnections:
-            true,
+        waitForConnections: true,
 
-        connectionLimit:
-            10,
+        connectionLimit: 10,
 
-        queueLimit:
-            0
+        queueLimit: 0
     });
 }
 
 // =====================================================
-// DATABASE SQL
+// DATABASE
+//
+// ONLY SAVES:
+//
+// 1. SESSION
+// 2. AUTO REPLIES
+//
+// DOES NOT SAVE:
+//
+// - chats
+// - messages
+// - message history
 // =====================================================
 
 async function initDatabase() {
@@ -180,9 +186,9 @@ async function initDatabase() {
             'MySQL connected.'
         );
 
-        // -------------------------------------------------
+        // =================================================
         // SESSIONS
-        // -------------------------------------------------
+        // =================================================
 
         await db.query(`
             CREATE TABLE IF NOT EXISTS sessions (
@@ -215,65 +221,179 @@ async function initDatabase() {
             COLLATE=utf8mb4_unicode_ci
         `);
 
-        // -------------------------------------------------
+        // =================================================
         // AUTO REPLIES
         //
-        // Multiple replies per WhatsApp account.
-        // Same trigger cannot exist twice for same account.
-        // -------------------------------------------------
+        // MULTIPLE RULES PER ACCOUNT
+        // =================================================
 
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS auto_replies (
-                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        let autoReplyExists = false;
 
-                account_number VARCHAR(32) NOT NULL,
+        try {
+            const [tables] =
+                await db.query(
+                    `
+                    SHOW TABLES LIKE 'auto_replies'
+                    `
+                );
 
-                enabled TINYINT(1)
-                    NOT NULL DEFAULT 1,
+            autoReplyExists =
+                tables.length > 0;
+        } catch (_) {
+            autoReplyExists = false;
+        }
 
-                trigger_text VARCHAR(255)
-                    NOT NULL,
+        if (!autoReplyExists) {
+            await db.query(`
+                CREATE TABLE auto_replies (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
 
-                reply_text MEDIUMTEXT
-                    NOT NULL,
+                    account_number VARCHAR(32) NOT NULL,
 
-                updated_at DATETIME
-                    NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    ON UPDATE CURRENT_TIMESTAMP,
+                    enabled TINYINT(1)
+                        NOT NULL DEFAULT 1,
 
-                PRIMARY KEY (id),
+                    trigger_text VARCHAR(255)
+                        NOT NULL,
 
-                UNIQUE KEY unique_account_trigger (
-                    account_number,
-                    trigger_text
-                ),
+                    reply_text MEDIUMTEXT
+                        NOT NULL,
 
-                INDEX idx_auto_reply_account (
-                    account_number
+                    updated_at DATETIME
+                        NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP,
+
+                    PRIMARY KEY (id),
+
+                    UNIQUE KEY unique_account_trigger (
+                        account_number,
+                        trigger_text
+                    ),
+
+                    INDEX idx_auto_reply_account (
+                        account_number
+                    )
                 )
-            )
-            ENGINE=InnoDB
-            DEFAULT CHARSET=utf8mb4
-            COLLATE=utf8mb4_unicode_ci
-        `);
+                ENGINE=InnoDB
+                DEFAULT CHARSET=utf8mb4
+                COLLATE=utf8mb4_unicode_ci
+            `);
+
+            console.log(
+                'Created auto_replies table.'
+            );
+        } else {
+            // ---------------------------------------------
+            // CHECK OLD TABLE STRUCTURE
+            // ---------------------------------------------
+
+            const [columns] =
+                await db.query(
+                    `
+                    SHOW COLUMNS
+                    FROM auto_replies
+                    `
+                );
+
+            const hasId =
+                columns.some(
+                    column =>
+                        column.Field === 'id'
+                );
+
+            // ---------------------------------------------
+            // OLD VERSION HAD:
+            //
+            // PRIMARY KEY(account_number)
+            //
+            // That allowed only ONE auto reply.
+            //
+            // Migrate it automatically.
+            // ---------------------------------------------
+
+            if (!hasId) {
+                console.log(
+                    'Old auto_replies table detected. Migrating...'
+                );
+
+                await db.query(`
+                    CREATE TABLE IF NOT EXISTS auto_replies_v2 (
+                        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+                        account_number VARCHAR(32) NOT NULL,
+
+                        enabled TINYINT(1)
+                            NOT NULL DEFAULT 1,
+
+                        trigger_text VARCHAR(255)
+                            NOT NULL,
+
+                        reply_text MEDIUMTEXT
+                            NOT NULL,
+
+                        updated_at DATETIME
+                            NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP,
+
+                        PRIMARY KEY (id),
+
+                        UNIQUE KEY unique_account_trigger (
+                            account_number,
+                            trigger_text
+                        ),
+
+                        INDEX idx_auto_reply_account (
+                            account_number
+                        )
+                    )
+                    ENGINE=InnoDB
+                    DEFAULT CHARSET=utf8mb4
+                    COLLATE=utf8mb4_unicode_ci
+                `);
+
+                await db.query(`
+                    INSERT IGNORE INTO auto_replies_v2 (
+                        account_number,
+                        enabled,
+                        trigger_text,
+                        reply_text
+                    )
+                    SELECT
+                        account_number,
+                        enabled,
+                        trigger_text,
+                        reply_text
+                    FROM auto_replies
+                `);
+
+                await db.query(
+                    'DROP TABLE auto_replies'
+                );
+
+                await db.query(
+                    'RENAME TABLE auto_replies_v2 TO auto_replies'
+                );
+
+                console.log(
+                    'auto_replies migration completed.'
+                );
+            }
+        }
+
+        // =================================================
+        // OLD CHAT TABLES ARE INTENTIONALLY NOT CREATED
+        // =================================================
+        //
+        // recent_chats
+        // chat_messages
+        //
+        // The server never writes to them.
+        //
+        // =================================================
 
         console.log(
             'Database tables ready.'
         );
-
-        /*
-         * OLD TABLES ARE NO LONGER USED:
-         *
-         * recent_chats
-         * chat_messages
-         *
-         * They are intentionally NOT created by this server.
-         *
-         * To delete old tables manually once:
-         *
-         * DROP TABLE IF EXISTS recent_chats;
-         * DROP TABLE IF EXISTS chat_messages;
-         */
     } catch (error) {
         console.error(
             'MySQL connection failed:',
@@ -456,7 +576,7 @@ async function getRecentChatsDirect() {
         );
     }
 
-    const chats =
+    const result =
         await client.pupPage.evaluate(
             () => {
                 const collections =
@@ -574,7 +694,7 @@ async function getRecentChatsDirect() {
             }
         );
 
-    return chats
+    return result
         .sort(
             (a, b) =>
                 Number(
@@ -621,7 +741,7 @@ async function fetchMessagesForChat(
                     !collections.Chat
                 ) {
                     throw new Error(
-                        'WhatsApp Chat collection unavailable.'
+                        'WAWebCollections.Chat is unavailable.'
                     );
                 }
 
@@ -638,7 +758,6 @@ async function fetchMessagesForChat(
                                     (
                                         item.id._serialized ===
                                             requestedChatId ||
-
                                         (
                                             item.id.user &&
                                             item.id.server &&
@@ -665,8 +784,7 @@ async function fetchMessagesForChat(
                 try {
                     if (
                         chat.msgs &&
-                        typeof chat.msgs
-                            .getModelsArray ===
+                        typeof chat.msgs.getModelsArray ===
                             'function'
                     ) {
                         messageModels =
@@ -678,16 +796,11 @@ async function fetchMessagesForChat(
                         [];
                 }
 
-                messageModels =
-                    messageModels.slice(
-                        -limit
-                    );
-
                 return messageModels
+                    .slice(-limit)
                     .map(
                         message => {
-                            let id =
-                                null;
+                            let id = null;
 
                             try {
                                 id =
@@ -867,6 +980,10 @@ async function getAutoReplies(
     }
 }
 
+// =====================================================
+// ADD AUTO REPLY
+// =====================================================
+
 async function addAutoReply(
     accountNumber,
     settings
@@ -893,9 +1010,7 @@ async function addAutoReply(
         ).trim();
 
     const enabled =
-        Boolean(
-            settings?.enabled
-        );
+        settings?.enabled !== false;
 
     if (!triggerText) {
         throw new Error(
@@ -910,8 +1025,7 @@ async function addAutoReply(
     }
 
     if (
-        triggerText.length >
-        255
+        triggerText.length > 255
     ) {
         throw new Error(
             'Trigger is too long.'
@@ -938,11 +1052,11 @@ async function addAutoReply(
         );
     } catch (error) {
         if (
-            error?.code ===
+            error.code ===
             'ER_DUP_ENTRY'
         ) {
             throw new Error(
-                `Auto reply for "${triggerText}" already exists.`
+                `Trigger "${triggerText}" already exists.`
             );
         }
 
@@ -953,6 +1067,10 @@ async function addAutoReply(
         accountNumber
     );
 }
+
+// =====================================================
+// TOGGLE AUTO REPLY
+// =====================================================
 
 async function toggleAutoReply(
     accountNumber,
@@ -1000,6 +1118,10 @@ async function toggleAutoReply(
         accountNumber
     );
 }
+
+// =====================================================
+// DELETE AUTO REPLY
+// =====================================================
 
 async function deleteAutoReply(
     accountNumber,
@@ -1070,6 +1192,8 @@ const client =
                     .PUPPETEER_EXECUTABLE_PATH ||
                 undefined,
 
+            headless: true,
+
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -1112,6 +1236,10 @@ io.on(
                 session.account_number ||
                 null;
 
+            // ---------------------------------------------
+            // SEND SESSION TOKEN
+            // ---------------------------------------------
+
             socket.emit(
                 'session',
                 {
@@ -1125,7 +1253,29 @@ io.on(
             );
 
             // ---------------------------------------------
-            // WHATSAPP ALREADY READY
+            // IMPORTANT QR FIX
+            //
+            // QR may have been generated BEFORE
+            // this browser connected.
+            // ---------------------------------------------
+
+            if (
+                latestQr &&
+                !whatsappReady
+            ) {
+                socket.emit(
+                    'qr',
+                    latestQr
+                );
+
+                socket.emit(
+                    'message',
+                    'Scan the QR code to connect WhatsApp.'
+                );
+            }
+
+            // ---------------------------------------------
+            // WHATSAPP READY
             // ---------------------------------------------
 
             if (whatsappReady) {
@@ -1164,10 +1314,10 @@ io.on(
                 await sendLiveChats(
                     socket
                 );
-            } else {
+            } else if (!latestQr) {
                 socket.emit(
                     'message',
-                    'Connecting to WhatsApp...'
+                    'Starting WhatsApp...'
                 );
             }
         } catch (error) {
@@ -1200,7 +1350,7 @@ io.on(
                 } catch (error) {
                     console.error(
                         'getChats error:',
-                        error
+                        error.message
                     );
 
                     socket.emit(
@@ -1337,6 +1487,9 @@ io.on(
                         return;
                     }
 
+                    socket.data.accountNumber =
+                        accountNumber;
+
                     const replies =
                         await addAutoReply(
                             accountNumber,
@@ -1349,7 +1502,8 @@ io.on(
                     );
 
                     socket.emit(
-                        'autoReplySaved'
+                        'autoReplySaved',
+                        true
                     );
 
                     socket.emit(
@@ -1489,6 +1643,11 @@ async function sendLiveChats(
     socket
 ) {
     if (!whatsappReady) {
+        socket.emit(
+            'message',
+            'WhatsApp is not ready yet.'
+        );
+
         return;
     }
 
@@ -1524,33 +1683,69 @@ async function sendLiveChats(
 
 client.on(
     'qr',
-    qr => {
+    async qr => {
         console.log(
-            'QR code generated.'
+            '===================================='
         );
 
-        qrcode.toDataURL(
-            qr,
-            (error, url) => {
-                if (error) {
-                    console.error(
-                        'QR generation failed:',
-                        error
-                    );
+        console.log(
+            'NEW WHATSAPP QR RECEIVED'
+        );
 
-                    return;
-                }
+        console.log(
+            '===================================='
+        );
 
-                io.emit(
-                    'qr',
-                    url
+        try {
+            const url =
+                await qrcode.toDataURL(
+                    qr
                 );
 
-                io.emit(
-                    'message',
-                    'Please scan the QR code with WhatsApp.'
-                );
-            }
+            // Save latest QR in memory
+            latestQr = url;
+
+            // Send to all current browsers
+            io.emit(
+                'qr',
+                url
+            );
+
+            io.emit(
+                'message',
+                'Scan the QR code to connect WhatsApp.'
+            );
+        } catch (error) {
+            console.error(
+                'QR generation failed:',
+                error
+            );
+
+            io.emit(
+                'message',
+                'Failed to generate QR code.'
+            );
+        }
+    }
+);
+
+// =====================================================
+// LOADING
+// =====================================================
+
+client.on(
+    'loading_screen',
+    (
+        percent,
+        message
+    ) => {
+        console.log(
+            `WhatsApp loading: ${percent}% ${message || ''}`
+        );
+
+        io.emit(
+            'message',
+            `WhatsApp loading: ${percent}%`
         );
     }
 );
@@ -1566,9 +1761,12 @@ client.on(
             'WhatsApp authenticated.'
         );
 
+        // QR no longer needed
+        latestQr = null;
+
         io.emit(
             'message',
-            'WhatsApp authenticated.'
+            'WhatsApp authenticated. Loading...'
         );
     }
 );
@@ -1583,6 +1781,8 @@ client.on(
         whatsappReady =
             false;
 
+        latestQr = null;
+
         console.error(
             'WhatsApp authentication failure:',
             error
@@ -1590,7 +1790,7 @@ client.on(
 
         io.emit(
             'message',
-            'WhatsApp authentication failed.'
+            `WhatsApp authentication failed: ${error}`
         );
     }
 );
@@ -1605,11 +1805,14 @@ client.on(
         whatsappReady =
             true;
 
+        // QR no longer needed
+        latestQr = null;
+
         const accountNumber =
             getAccountNumber();
 
         console.log(
-            '======================================'
+            '===================================='
         );
 
         console.log(
@@ -1622,18 +1825,19 @@ client.on(
         );
 
         console.log(
-            '======================================'
+            '===================================='
         );
 
         // ---------------------------------------------
-        // Attach current WhatsApp account to sessions
+        // Update all connected sessions
         // ---------------------------------------------
 
         for (
             const [
                 ,
                 socket
-            ] of io.sockets.sockets
+            ]
+            of io.sockets.sockets
         ) {
             socket.data.accountNumber =
                 accountNumber;
@@ -1643,6 +1847,10 @@ client.on(
                 accountNumber
             );
         }
+
+        // ---------------------------------------------
+        // Notify browser
+        // ---------------------------------------------
 
         io.emit(
             'ready',
@@ -1655,8 +1863,13 @@ client.on(
             }
         );
 
+        io.emit(
+            'message',
+            'WhatsApp connected.'
+        );
+
         // ---------------------------------------------
-        // Send auto replies
+        // Auto replies
         // ---------------------------------------------
 
         if (accountNumber) {
@@ -1672,7 +1885,7 @@ client.on(
         }
 
         // ---------------------------------------------
-        // Load LIVE chats
+        // LIVE CHATS
         // ---------------------------------------------
 
         try {
@@ -1703,22 +1916,19 @@ client.on(
 );
 
 // =====================================================
-// MESSAGE CREATED
+// MESSAGE CREATE
 //
-// ONLY NOTIFY FRONTEND.
-// NO DATABASE.
-//
-// This is for refreshing the chat/messages UI.
+// NO DATABASE
 // =====================================================
 
 client.on(
     'message_create',
-    async message => {
+    message => {
         try {
             const chatId =
-                message?.fromMe
+                message.fromMe
                     ? message.to
-                    : message?.from;
+                    : message.from;
 
             if (!chatId) {
                 return;
@@ -1738,16 +1948,19 @@ client.on(
 );
 
 // =====================================================
-// MULTIPLE AUTO REPLIES
+// AUTO REPLY
 //
-// RULES:
-// - incoming only
-// - individual users only
-// - groups ignored
-// - trigger must match exactly
-// - case insensitive
-// - first matching enabled rule replies
-// - nothing saved to message DB
+// MULTIPLE RULES
+//
+// Example:
+//
+// START -> Welcome
+// PRICE -> Price list...
+// HELP  -> How can I help?
+//
+// Groups ignored.
+// Only individual users.
+// Exact trigger, case-insensitive.
 // =====================================================
 
 client.on(
@@ -1772,7 +1985,10 @@ client.on(
                 return;
             }
 
+            // ---------------------------------------------
             // Ignore groups
+            // ---------------------------------------------
+
             if (
                 chatId.endsWith(
                     '@g.us'
@@ -1781,7 +1997,10 @@ client.on(
                 return;
             }
 
+            // ---------------------------------------------
             // Only individual users
+            // ---------------------------------------------
+
             const isIndividual =
                 chatId.endsWith(
                     '@c.us'
@@ -1801,20 +2020,21 @@ client.on(
                 return;
             }
 
-            const replies =
+            const rules =
                 await getAutoReplies(
                     accountNumber
                 );
 
             if (
-                !replies.length
+                !rules.length
             ) {
                 return;
             }
 
             const receivedText =
                 String(
-                    message.body || ''
+                    message.body ||
+                    ''
                 )
                     .trim()
                     .toLowerCase();
@@ -1823,49 +2043,54 @@ client.on(
                 return;
             }
 
-            for (
-                const rule
-                of replies
-            ) {
-                if (
-                    !rule.enabled
-                ) {
-                    continue;
-                }
+            // ---------------------------------------------
+            // Find first matching enabled rule
+            // ---------------------------------------------
 
-                const trigger =
-                    String(
-                        rule.triggerText ||
-                        ''
-                    )
-                        .trim()
-                        .toLowerCase();
+            const matchedRule =
+                rules.find(
+                    rule => {
+                        if (
+                            !rule.enabled
+                        ) {
+                            return false;
+                        }
 
-                if (!trigger) {
-                    continue;
-                }
+                        const trigger =
+                            String(
+                                rule.triggerText ||
+                                ''
+                            )
+                                .trim()
+                                .toLowerCase();
 
-                if (
-                    receivedText ===
-                    trigger
-                ) {
-                    console.log(
-                        `AUTO REPLY: "${rule.triggerText}" -> ${chatId}`
-                    );
+                        return (
+                            trigger &&
+                            receivedText ===
+                                trigger
+                        );
+                    }
+                );
 
-                    await message.reply(
-                        rule.replyText
-                    );
-
-                    console.log(
-                        `AUTO REPLY SENT -> ${chatId}`
-                    );
-
-                    // Only one reply
-                    // per received message.
-                    break;
-                }
+            if (!matchedRule) {
+                return;
             }
+
+            console.log(
+                'AUTO REPLY MATCH:',
+                matchedRule.triggerText,
+                '->',
+                chatId
+            );
+
+            await message.reply(
+                matchedRule.replyText
+            );
+
+            console.log(
+                'AUTO REPLY SENT:',
+                chatId
+            );
         } catch (error) {
             console.error(
                 'AUTO REPLY ERROR:',
@@ -1884,6 +2109,8 @@ client.on(
     reason => {
         whatsappReady =
             false;
+
+        latestQr = null;
 
         console.log(
             'WhatsApp disconnected:',
@@ -1906,25 +2133,39 @@ client.on(
 );
 
 // =====================================================
-// START
+// CHANGE STATE
+// =====================================================
+
+client.on(
+    'change_state',
+    state => {
+        console.log(
+            'WhatsApp state:',
+            state
+        );
+
+        io.emit(
+            'whatsappState',
+            String(state)
+        );
+    }
+);
+
+// =====================================================
+// START SERVER
 // =====================================================
 
 async function start() {
-    // Create DB tables automatically
+    // ---------------------------------------------
+    // Create/check database tables
+    // ---------------------------------------------
+
     await initDatabase();
 
-    // Start WhatsApp
-    client.initialize()
-        .catch(
-            error => {
-                console.error(
-                    'WhatsApp initialize error:',
-                    error
-                );
-            }
-        );
+    // ---------------------------------------------
+    // Start HTTP server FIRST
+    // ---------------------------------------------
 
-    // Start HTTP server
     server.listen(
         PORT,
         () => {
@@ -1933,6 +2174,28 @@ async function start() {
             );
         }
     );
+
+    // ---------------------------------------------
+    // Initialize WhatsApp
+    // ---------------------------------------------
+
+    console.log(
+        'Initializing WhatsApp...'
+    );
+
+    try {
+        await client.initialize();
+    } catch (error) {
+        console.error(
+            'WhatsApp initialize error:',
+            error
+        );
+
+        io.emit(
+            'message',
+            `WhatsApp initialization failed: ${error.message}`
+        );
+    }
 }
 
 start().catch(

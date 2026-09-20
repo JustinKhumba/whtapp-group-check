@@ -36,8 +36,8 @@ const client = new Client({
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--single-process', // Heavily reduces memory usage
             '--disable-gpu'
+            // REMOVED: '--single-process' which causes massive WA Web slowdowns/hangs
         ]
     }
 });
@@ -81,25 +81,32 @@ client.on('disconnected', (reason) => {
 client.on('ready', async () => {
     console.log('WhatsApp Client is ready!');
     io.emit('ready', `WhatsApp is ready! Connected as ${client.info?.pushname || 'User'}`);
-    io.emit('message', 'Fetching chats...');
+    io.emit('message', 'Synchronizing data... Please wait a moment.');
 
-    try {
-        // Fetch chats from the account
-        const chats = await client.getChats();
-        
-        // Map down the complex chat objects to simple data for the frontend
-        const chatData = chats.map(chat => ({
-            name: chat.name || chat.id.user,
-            id: chat.id._serialized,
-            unread: chat.unreadCount
-        }));
-        
-        // Send chats to the frontend
-        io.emit('chats', chatData);
-    } catch (error) {
-        console.error('Error fetching chats:', error);
-        io.emit('message', 'Error fetching chats. Check server logs.');
-    }
+    // Add a small delay to allow WA Web to finish syncing chats in the background
+    setTimeout(async () => {
+        io.emit('message', 'Fetching chats...');
+        try {
+            // Fetch chats from the account
+            const chats = await client.getChats();
+            
+            // Map down the complex chat objects to simple data for the frontend
+            // Limit to the 50 most recent chats to prevent WebSocket/Memory overload
+            const chatData = chats.slice(0, 50).map(chat => ({
+                name: chat.name || (chat.id && chat.id.user) || 'Unknown',
+                id: chat.id && chat.id._serialized,
+                unread: chat.unreadCount || 0
+            }));
+            
+            // Send chats to the frontend
+            io.emit('chats', chatData);
+            io.emit('message', `Successfully loaded ${chatData.length} recent chats.`);
+        } catch (error) {
+            console.error('Error fetching chats:', error);
+            // Send the raw error directly to the UI so you can see exactly what failed
+            io.emit('message', `Error fetching chats: ${error.message}`);
+        }
+    }, 5000); // 5-second buffer delay
 });
 
 // Catch any initialization errors so they don't crash the Node process

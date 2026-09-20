@@ -27,114 +27,174 @@
         .message-out {
             background: #dcf8c6;
         }
+        
+        /* Ensures the scrolling panels fit precisely in tab layout */
+        .scrolling-panel {
+            height: calc(100vh - 250px);
+        }
     </style>
 </head>
-<body class="min-h-screen bg-slate-100 text-slate-800">
-    <div class="mx-auto flex min-h-screen w-full max-w-7xl flex-col">
-        <!-- HEADER -->
-        <header class="border-b border-slate-200 bg-white px-4 py-4 shadow-sm">
-            <div class="flex items-center justify-between gap-4">
-                <div>
-                    <h1 class="text-xl font-bold">WhatsApp Web</h1>
-                    <div id="connected-account" class="mt-1 text-sm font-semibold text-slate-500">
-                        CONNECTED AS
-                    </div>
+<body class="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
+    <!-- HEADER -->
+    <header class="border-b border-slate-200 bg-white px-4 py-4 shadow-sm z-10 shrink-0">
+        <div class="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
+            <div>
+                <h1 class="text-xl font-bold">WhatsApp Web</h1>
+                <div id="connected-account" class="mt-1 text-sm font-semibold text-slate-500">
+                    CONNECTED AS
                 </div>
-                <button id="refresh-chats" type="button" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-                    Refresh
-                </button>
             </div>
-        </header>
-        
-        <!-- STATUS -->
-        <div id="status-message" class="mx-4 mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-medium text-blue-700">
+            <button id="refresh-chats" type="button" class="hidden rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition">
+                Refresh
+            </button>
+        </div>
+    </header>
+
+    <!-- STATUS -->
+    <div class="mx-auto w-full max-w-7xl shrink-0">
+        <div id="status-message" class="mx-4 mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-medium text-blue-700 shadow-sm">
             Connecting to Server...
         </div>
+    </div>
+
+    <!-- QR -->
+    <section id="qr-container" class="mx-auto w-full max-w-xl mt-4 hidden rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+        <p class="mb-6 text-center text-sm font-medium text-slate-500">
+            Open WhatsApp on your phone > Settings > Linked Devices > Link a Device
+        </p>
+        <div class="flex justify-center">
+            <img id="qr-image" src="" alt="WhatsApp QR Code" class="h-64 w-64 rounded-xl border border-slate-200 shadow-sm">
+        </div>
+    </section>
+
+    <!-- MAIN APP CONTENT (TABS) -->
+    <div id="app-main" class="hidden flex-1 flex-col mx-auto w-full max-w-7xl mt-4 relative">
         
-        <!-- QR -->
-        <section id="qr-container" class="mx-4 mt-4 hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p class="mb-4 text-center text-sm text-slate-500">
-                Open WhatsApp on your phone > Settings > Linked Devices > Link a Device
-            </p>
-            <div class="flex justify-center">
-                <img id="qr-image" src="" alt="WhatsApp QR Code" class="h-64 w-64 rounded-xl border border-slate-200">
+        <!-- TAB BAR -->
+        <div class="flex gap-2 overflow-x-auto border-b border-slate-200 px-4 shrink-0 bg-transparent">
+            <button class="tab-btn px-4 py-3 border-b-2 border-slate-900 text-sm font-semibold text-slate-900 transition-colors" data-target="tab-chats">
+                Chats
+            </button>
+            <button class="tab-btn px-4 py-3 border-b-2 border-transparent text-sm font-semibold text-slate-500 hover:text-slate-900 transition-colors" data-target="tab-auto-reply">
+                Auto Replies
+            </button>
+            <button class="tab-btn px-4 py-3 border-b-2 border-transparent text-sm font-semibold text-slate-500 hover:text-slate-900 transition-colors" data-target="tab-group-checker">
+                Group Checker
+            </button>
+        </div>
+
+        <!-- TAB CONTENT CONTAINER -->
+        <main class="flex-1 relative">
+            
+            <!-- CHATS TAB -->
+            <div id="tab-chats" class="tab-content absolute inset-0 p-4 w-full h-full block">
+                <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 h-full">
+                    <!-- RECENT CHATS -->
+                    <section class="flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-1 h-full">
+                        <div class="flex items-center justify-between border-b border-slate-100 px-4 py-4 shrink-0">
+                            <div>
+                                <h2 class="font-semibold text-slate-800">Recent Chats</h2>
+                                <p class="text-xs text-slate-400">
+                                    <span id="chat-count">0</span> chats
+                                </p>
+                            </div>
+                        </div>
+                        <ul id="chats-list" class="flex-1 overflow-y-auto"></ul>
+                    </section>
+                    
+                    <!-- MESSAGES -->
+                    <section class="flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-2 h-full">
+                        <div class="border-b border-slate-100 px-4 py-4 shrink-0">
+                            <h2 id="selected-chat-name" class="font-semibold text-slate-800">Select a chat</h2>
+                            <p id="selected-chat-id" class="mt-1 text-xs text-slate-400"></p>
+                        </div>
+                        <div id="messages-list" class="flex-1 space-y-2 overflow-y-auto bg-slate-50 p-4">
+                            <div class="py-10 text-center text-sm text-slate-400">
+                                Select a chat to view messages.
+                            </div>
+                        </div>
+                    </section>
+                </div>
             </div>
-        </section>
-        
-        <!-- MAIN -->
-        <main class="grid flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-3">
-            <!-- RECENT CHATS -->
-            <section id="chats-container" class="hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-1">
-                <div class="flex items-center justify-between border-b border-slate-100 px-4 py-4">
-                    <div>
-                        <h2 class="font-semibold">Recent Chats</h2>
-                        <p class="text-xs text-slate-400">
-                            <span id="chat-count">0</span> chats
-                        </p>
-                    </div>
-                </div>
-                <ul id="chats-list" class="max-h-[70vh] overflow-y-auto"></ul>
-            </section>
-            
-            <!-- MESSAGES -->
-            <section id="messages-container" class="hidden flex min-h-[500px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-2">
-                <div class="border-b border-slate-100 px-4 py-4">
-                    <h2 id="selected-chat-name" class="font-semibold">Select a chat</h2>
-                    <p id="selected-chat-id" class="mt-1 text-xs text-slate-400"></p>
-                </div>
-                <div id="messages-list" class="flex-1 space-y-2 overflow-y-auto bg-slate-50 p-4">
-                    <div class="py-10 text-center text-sm text-slate-400">
-                        Select a chat to view messages.
-                    </div>
-                </div>
-            </section>
-            
-            <!-- AUTO REPLIES -->
-            <section id="auto-reply-panel" class="hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-3">
-                <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                        <h2 class="font-semibold text-slate-700">Auto Replies</h2>
-                        <p class="mt-1 text-xs text-slate-400">Individual users only. Groups are ignored.</p>
-                    </div>
-                    <span id="auto-reply-status" class="text-xs text-slate-400">
-                        No auto replies
-                    </span>
-                </div>
-                
-                <!-- ADD FORM -->
-                <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <h3 class="text-sm font-semibold text-slate-700">Add Auto Reply</h3>
-                    <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+
+            <!-- AUTO REPLIES TAB -->
+            <div id="tab-auto-reply" class="tab-content absolute inset-0 p-4 w-full h-full hidden overflow-y-auto">
+                <section class="mx-auto max-w-4xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                         <div>
-                            <label for="auto-reply-trigger" class="mb-1 block text-xs font-semibold text-slate-500">Trigger</label>
-                            <input id="auto-reply-trigger" type="text" maxlength="255" value="START" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" placeholder="START">
+                            <h2 class="font-semibold text-slate-800 text-lg">Auto Replies</h2>
+                            <p class="mt-1 text-sm text-slate-500">Respond automatically to individual users. Groups are ignored.</p>
                         </div>
-                        <div>
-                            <label for="auto-reply-text" class="mb-1 block text-xs font-semibold text-slate-500">Response</label>
-                            <textarea id="auto-reply-text" rows="2" class="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" placeholder="Hello! Thanks for messaging."></textarea>
+                        <span id="auto-reply-status" class="text-xs font-medium text-slate-400 px-3 py-1 bg-slate-100 rounded-full">
+                            No auto replies
+                        </span>
+                    </div>
+                    
+                    <!-- ADD FORM -->
+                    <div class="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
+                        <h3 class="text-sm font-semibold text-slate-700">Create New Rule</h3>
+                        <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div>
+                                <label for="auto-reply-trigger" class="mb-1 block text-xs font-semibold text-slate-500">Trigger Word/Phrase</label>
+                                <input id="auto-reply-trigger" type="text" maxlength="255" value="START" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400 transition" placeholder="e.g. HELP">
+                            </div>
+                            <div>
+                                <label for="auto-reply-text" class="mb-1 block text-xs font-semibold text-slate-500">Response Message</label>
+                                <textarea id="auto-reply-text" rows="2" class="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400 transition" placeholder="Hello! How can I help you?"></textarea>
+                            </div>
+                        </div>
+                        <div class="mt-4 flex flex-wrap items-center gap-4">
+                            <label class="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-700">
+                                <input id="auto-reply-enabled" type="checkbox" class="h-4 w-4 text-slate-900 rounded border-slate-300" checked> Enabled
+                            </label>
+                            <button id="add-auto-reply" type="button" class="rounded-lg bg-slate-900 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition shadow-sm">
+                                Add Auto Reply
+                            </button>
+                            <span id="auto-reply-form-status" class="text-xs font-medium text-slate-400"></span>
                         </div>
                     </div>
-                    <div class="mt-3 flex flex-wrap items-center gap-3">
-                        <label class="flex cursor-pointer items-center gap-2 text-sm font-semibold">
-                            <input id="auto-reply-enabled" type="checkbox" class="h-4 w-4" checked> Enabled
-                        </label>
-                        <button id="add-auto-reply" type="button" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-                            Add Auto Reply
+                    
+                    <!-- RULE LIST -->
+                    <div class="mt-8">
+                        <h3 class="text-sm font-semibold text-slate-700 mb-4">Saved Rules</h3>
+                        <div id="auto-replies-list" class="space-y-3">
+                            <div class="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400 bg-slate-50">
+                                No auto replies saved. Create your first rule above.
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- GROUP CHECKER TAB -->
+            <div id="tab-group-checker" class="tab-content absolute inset-0 p-4 w-full h-full hidden overflow-y-auto">
+                <section class="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div>
+                        <h2 class="font-semibold text-slate-800 text-lg">Group Membership Checker</h2>
+                        <p class="mt-1 text-sm text-slate-500">Check if a specific phone number is a participant of a group.</p>
+                    </div>
+
+                    <div class="mt-6 space-y-5">
+                        <div>
+                            <label class="mb-1 block text-sm font-semibold text-slate-600">Group ID</label>
+                            <input id="check-group-id" type="text" class="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm outline-none focus:border-slate-400 focus:bg-white transition" value="120363432024412577@g.us">
+                            <p class="text-xs text-slate-400 mt-1">Make sure the ID ends with @g.us</p>
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-sm font-semibold text-slate-600">Target Phone Number</label>
+                            <input id="check-phone-number" type="text" class="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm outline-none focus:border-slate-400 focus:bg-white transition" placeholder="e.g. 1234567890">
+                        </div>
+                        <button id="btn-check-group" class="w-full md:w-auto rounded-lg bg-slate-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 transition shadow-sm">
+                            Verify Membership
                         </button>
-                        <span id="auto-reply-form-status" class="text-xs text-slate-400"></span>
                     </div>
-                </div>
-                
-                <!-- RULE LIST -->
-                <div class="mt-5">
-                    <h3 class="text-sm font-semibold text-slate-700">Saved Rules</h3>
-                    <div id="auto-replies-list" class="mt-3 space-y-3">
-                        <div class="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-400">
-                            No auto replies saved.
-                        </div>
+
+                    <div id="check-result-container" class="mt-6 hidden rounded-xl p-4 border shadow-sm transition-all duration-300">
+                        <!-- Results populate here -->
                     </div>
-                </div>
-            </section>
+                </section>
+            </div>
+
         </main>
     </div>
 
@@ -144,20 +204,24 @@
             auth: { sessionToken: savedSessionToken || null }
         });
 
-        // Elements
+        // -------------------------
+        // DOM Elements
+        // -------------------------
         const statusMessage = document.getElementById('status-message');
         const qrContainer = document.getElementById('qr-container');
         const qrImage = document.getElementById('qr-image');
+        const appMain = document.getElementById('app-main');
         const connectedAccount = document.getElementById('connected-account');
-        const chatsContainer = document.getElementById('chats-container');
+        const refreshChatsButton = document.getElementById('refresh-chats');
+        
+        // Chats Elements
         const chatsList = document.getElementById('chats-list');
         const chatCount = document.getElementById('chat-count');
-        const messagesContainer = document.getElementById('messages-container');
         const messagesList = document.getElementById('messages-list');
         const selectedChatName = document.getElementById('selected-chat-name');
         const selectedChatId = document.getElementById('selected-chat-id');
-        const refreshChatsButton = document.getElementById('refresh-chats');
-        const autoReplyPanel = document.getElementById('auto-reply-panel');
+        
+        // Auto Reply Elements
         const autoReplyTrigger = document.getElementById('auto-reply-trigger');
         const autoReplyText = document.getElementById('auto-reply-text');
         const autoReplyEnabled = document.getElementById('auto-reply-enabled');
@@ -165,37 +229,74 @@
         const autoRepliesList = document.getElementById('auto-replies-list');
         const autoReplyStatus = document.getElementById('auto-reply-status');
         const autoReplyFormStatus = document.getElementById('auto-reply-form-status');
-        
+
+        // Group Check Elements
+        const checkGroupId = document.getElementById('check-group-id');
+        const checkPhoneNumber = document.getElementById('check-phone-number');
+        const btnCheckGroup = document.getElementById('btn-check-group');
+        const checkResultContainer = document.getElementById('check-result-container');
+
         let currentChats = [];
         let currentChatId = null;
         let currentAutoReplies = [];
 
+        // -------------------------
+        // Tab Navigation
+        // -------------------------
+        const tabButtons = document.querySelectorAll('.tab-btn');
+        const tabContents = document.querySelectorAll('.tab-content');
+
+        tabButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                // Deactivate all
+                tabButtons.forEach(b => {
+                    b.classList.remove('border-slate-900', 'text-slate-900');
+                    b.classList.add('border-transparent', 'text-slate-500');
+                });
+                tabContents.forEach(c => {
+                    c.classList.remove('block');
+                    c.classList.add('hidden');
+                });
+
+                // Activate Target
+                btn.classList.remove('border-transparent', 'text-slate-500');
+                btn.classList.add('border-slate-900', 'text-slate-900');
+                const targetId = btn.getAttribute('data-target');
+                const targetEl = document.getElementById(targetId);
+                if (targetEl) {
+                    targetEl.classList.remove('hidden');
+                    targetEl.classList.add('block');
+                }
+            });
+        });
+
+        // -------------------------
+        // Utility Status Functions
+        // -------------------------
         function setStatus(text, type = 'info') {
             statusMessage.textContent = text;
             if (type === 'success') {
-                statusMessage.className = 'mx-4 mt-4 rounded-xl border border-green-100 bg-green-50 p-4 text-sm font-medium text-green-700';
+                statusMessage.className = 'mx-4 mt-4 rounded-xl border border-green-200 bg-green-50 p-4 text-sm font-medium text-green-700 shadow-sm';
             } else if (type === 'error') {
-                statusMessage.className = 'mx-4 mt-4 rounded-xl border border-red-100 bg-red-50 p-4 text-sm font-medium text-red-700';
+                statusMessage.className = 'mx-4 mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700 shadow-sm';
             } else if (type === 'warning') {
-                statusMessage.className = 'mx-4 mt-4 rounded-xl border border-yellow-100 bg-yellow-50 p-4 text-sm font-medium text-yellow-700';
+                statusMessage.className = 'mx-4 mt-4 rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-sm font-medium text-yellow-700 shadow-sm';
             } else {
-                statusMessage.className = 'mx-4 mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-medium text-blue-700';
+                statusMessage.className = 'mx-4 mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-medium text-blue-700 shadow-sm';
             }
         }
 
         function setFormStatus(text, type = 'info') {
             autoReplyFormStatus.textContent = text;
-            autoReplyFormStatus.className = type === 'error' ? 'text-xs text-red-500' : type === 'success' ? 'text-xs text-green-600' : 'text-xs text-slate-400';
+            autoReplyFormStatus.className = type === 'error' ? 'text-xs font-semibold text-red-500' : type === 'success' ? 'text-xs font-semibold text-green-600' : 'text-xs font-semibold text-slate-400';
         }
 
-        socket.on('connect', () => {
-            setStatus('Connected to server. Waiting for WhatsApp...');
-        });
-
-        socket.on('disconnect', () => {
-            setStatus('Disconnected from server.', 'error');
-        });
-
+        // -------------------------
+        // Socket Connectivity
+        // -------------------------
+        socket.on('connect', () => setStatus('Connected to server. Waiting for WhatsApp...'));
+        socket.on('disconnect', () => setStatus('Disconnected from server.', 'error'));
+        
         socket.on('session', data => {
             if (data?.token) localStorage.setItem('whatsapp_session_token', data.token);
             if (data?.accountNumber) connectedAccount.textContent = `CONNECTED AS ${data.accountNumber}`;
@@ -213,29 +314,32 @@
 
         socket.on('qr', url => {
             qrContainer.classList.remove('hidden');
-            chatsContainer.classList.add('hidden');
-            messagesContainer.classList.add('hidden');
+            appMain.classList.add('hidden');
+            refreshChatsButton.classList.add('hidden');
             qrImage.src = url;
             setStatus('Scan the QR code to login.', 'warning');
         });
 
         socket.on('ready', data => {
             qrContainer.classList.add('hidden');
-            chatsContainer.classList.remove('hidden');
-            messagesContainer.classList.remove('hidden');
-            autoReplyPanel.classList.remove('hidden');
+            appMain.classList.remove('hidden');
+            appMain.classList.add('flex');
+            refreshChatsButton.classList.remove('hidden');
             
             if (data?.accountNumber) connectedAccount.textContent = `CONNECTED AS ${data.accountNumber}`;
             setStatus('WhatsApp is connected.', 'success');
+            
             socket.emit('getAutoReplies');
             socket.emit('getChats');
         });
 
+        // -------------------------
+        // Chat List Rendering
+        // -------------------------
         socket.on('chats', chats => {
             currentChats = Array.isArray(chats) ? chats : [];
             chatCount.textContent = currentChats.length;
             renderChats(currentChats);
-            chatsContainer.classList.remove('hidden');
         });
 
         function renderChats(chats) {
@@ -260,20 +364,25 @@
                 left.className = 'min-w-0 flex-1';
                 
                 const name = document.createElement('div');
-                name.className = 'truncate font-semibold text-slate-700';
+                name.className = 'truncate font-semibold text-slate-800';
                 name.textContent = chat.name || 'Unknown';
+
+                const msgPreview = document.createElement('div');
+                msgPreview.className = 'mt-1 truncate text-xs text-slate-500';
+                msgPreview.textContent = chat.lastMessage || (chat.isGroup ? 'Group Chat' : 'No messages');
                 
                 const id = document.createElement('div');
-                id.className = 'mt-1 truncate text-xs text-slate-400';
+                id.className = 'mt-0.5 truncate text-[10px] text-slate-400 font-mono';
                 id.textContent = chat.id;
                 
                 left.appendChild(name);
+                left.appendChild(msgPreview);
                 left.appendChild(id);
                 row.appendChild(left);
                 
                 if (Number(chat.unread || 0) > 0) {
                     const unread = document.createElement('span');
-                    unread.className = 'flex h-6 min-w-6 items-center justify-center rounded-full bg-green-500 px-2 text-xs font-bold text-white';
+                    unread.className = 'flex h-5 min-w-5 items-center justify-center rounded-full bg-green-500 px-1.5 text-[10px] font-bold text-white shadow-sm';
                     unread.textContent = String(chat.unread);
                     row.appendChild(unread);
                 }
@@ -301,7 +410,7 @@
 
         socket.on('messagesError', error => {
             if (!currentChatId) return;
-            messagesList.innerHTML = `<div class="p-4 text-center text-sm text-red-500">${String(error || 'Failed to load messages.')}</div>`;
+            messagesList.innerHTML = `<div class="p-4 text-center text-sm font-medium text-red-500">${String(error || 'Failed to load messages.')}</div>`;
         });
 
         function renderMessages(messages) {
@@ -316,10 +425,10 @@
                 wrapper.className = message.fromMe ? 'flex justify-end' : 'flex justify-start';
                 
                 const bubble = document.createElement('div');
-                bubble.className = message.fromMe ? 'message-out max-w-[80%] rounded-xl px-3 py-2 shadow-sm' : 'message-in max-w-[80%] rounded-xl px-3 py-2 shadow-sm';
+                bubble.className = message.fromMe ? 'message-out max-w-[85%] rounded-xl px-3 py-2 shadow-sm' : 'message-in max-w-[85%] rounded-xl px-3 py-2 shadow-sm border border-slate-100';
                 
                 const body = document.createElement('div');
-                body.className = 'whitespace-pre-wrap break-words text-sm';
+                body.className = 'whitespace-pre-wrap break-words text-sm text-slate-800';
                 body.textContent = message.body || `[${message.type || 'message'}]`;
                 
                 const time = document.createElement('div');
@@ -336,7 +445,7 @@
 
         function formatTimestamp(timestamp) {
             const number = Number(timestamp || 0);
-            return number ? new Date(number * 1000).toLocaleString() : '';
+            return number ? new Date(number * 1000).toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }) : '';
         }
 
         socket.on('newMessage', data => {
@@ -349,6 +458,9 @@
             socket.emit('getChats');
         });
 
+        // -------------------------
+        // Auto Replies Logic
+        // -------------------------
         socket.on('autoReplies', replies => {
             currentAutoReplies = Array.isArray(replies) ? replies : [];
             renderAutoReplies(currentAutoReplies);
@@ -362,19 +474,19 @@
         function renderAutoReplies(replies) {
             autoRepliesList.innerHTML = '';
             if (!replies.length) {
-                autoRepliesList.innerHTML = '<div class="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-400">No auto replies saved.</div>';
+                autoRepliesList.innerHTML = '<div class="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400 bg-slate-50">No auto replies saved. Create your first rule above.</div>';
                 autoReplyStatus.textContent = 'No auto replies';
-                autoReplyStatus.className = 'text-xs text-slate-400';
+                autoReplyStatus.className = 'text-xs font-medium text-slate-400 px-3 py-1 bg-slate-100 rounded-full';
                 return;
             }
             
             const enabledCount = replies.filter(reply => reply.enabled).length;
-            autoReplyStatus.textContent = `${replies.length} rule${replies.length === 1 ? '' : 's'} - ${enabledCount} enabled`;
-            autoReplyStatus.className = enabledCount > 0 ? 'text-xs text-green-600' : 'text-xs text-slate-400';
+            autoReplyStatus.textContent = `${replies.length} rule${replies.length === 1 ? '' : 's'} (${enabledCount} active)`;
+            autoReplyStatus.className = enabledCount > 0 ? 'text-xs font-medium text-green-700 px-3 py-1 bg-green-100 rounded-full' : 'text-xs font-medium text-slate-500 px-3 py-1 bg-slate-100 rounded-full';
             
             replies.forEach(reply => {
                 const card = document.createElement('div');
-                card.className = 'rounded-xl border border-slate-200 p-4';
+                card.className = 'rounded-xl border border-slate-200 bg-white p-4 shadow-sm';
                 
                 const top = document.createElement('div');
                 top.className = 'flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between';
@@ -383,26 +495,26 @@
                 left.className = 'min-w-0 flex-1';
                 
                 const trigger = document.createElement('div');
-                trigger.className = 'font-semibold text-slate-700';
-                trigger.textContent = `Trigger: ${reply.triggerText}`;
+                trigger.className = 'font-semibold text-slate-800 flex items-center gap-2';
+                trigger.innerHTML = `<span class="text-xs uppercase tracking-wider text-slate-400">Trigger:</span> ${reply.triggerText}`;
                 
                 const response = document.createElement('div');
-                response.className = 'mt-2 whitespace-pre-wrap break-words text-sm text-slate-500';
+                response.className = 'mt-2 whitespace-pre-wrap break-words text-sm text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100';
                 response.textContent = reply.replyText;
                 
                 left.appendChild(trigger);
                 left.appendChild(response);
                 
                 const controls = document.createElement('div');
-                controls.className = 'flex shrink-0 items-center gap-2';
+                controls.className = 'flex shrink-0 items-center gap-3 mt-2 sm:mt-0';
                 
                 const enabledLabel = document.createElement('label');
-                enabledLabel.className = 'flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-500';
+                enabledLabel.className = 'flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-600';
                 
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
                 checkbox.checked = Boolean(reply.enabled);
-                checkbox.className = 'h-4 w-4';
+                checkbox.className = 'h-4 w-4 text-slate-900 rounded border-slate-300';
                 checkbox.addEventListener('change', () => {
                     socket.emit('toggleAutoReply', { id: reply.id, enabled: checkbox.checked });
                 });
@@ -412,7 +524,7 @@
                 
                 const deleteButton = document.createElement('button');
                 deleteButton.type = 'button';
-                deleteButton.className = 'rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-100';
+                deleteButton.className = 'rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-100 transition';
                 deleteButton.textContent = 'Delete';
                 deleteButton.addEventListener('click', () => {
                     socket.emit('deleteAutoReply', reply.id);
@@ -433,16 +545,16 @@
             const enabled = autoReplyEnabled.checked;
             
             if (!triggerText) {
-                setFormStatus('Enter a trigger.', 'error');
+                setFormStatus('Enter a trigger word.', 'error');
                 return;
             }
             if (!replyText) {
-                setFormStatus('Enter a response.', 'error');
+                setFormStatus('Enter a response message.', 'error');
                 return;
             }
             
             addAutoReplyButton.disabled = true;
-            setFormStatus('Saving...');
+            setFormStatus('Saving...', 'info');
             socket.emit('addAutoReply', { enabled, triggerText, replyText });
         });
 
@@ -450,8 +562,62 @@
             autoReplyTrigger.value = '';
             autoReplyText.value = '';
             autoReplyEnabled.checked = true;
-            setFormStatus('Saved.', 'success');
+            setFormStatus('Saved successfully.', 'success');
             addAutoReplyButton.disabled = false;
+        });
+
+        // -------------------------
+        // Group Membership Check
+        // -------------------------
+        btnCheckGroup.addEventListener('click', () => {
+            const groupId = checkGroupId.value.trim();
+            const number = checkPhoneNumber.value.trim();
+
+            if (!groupId || !number) {
+                checkResultContainer.className = 'mt-6 rounded-xl p-4 border border-red-200 bg-red-50 text-red-700 text-sm shadow-sm';
+                checkResultContainer.textContent = 'Please provide both Group ID and Target Phone Number.';
+                checkResultContainer.classList.remove('hidden');
+                return;
+            }
+
+            checkResultContainer.className = 'mt-6 rounded-xl p-4 border border-blue-200 bg-blue-50 text-blue-700 text-sm shadow-sm';
+            checkResultContainer.textContent = 'Verifying membership...';
+            checkResultContainer.classList.remove('hidden');
+
+            btnCheckGroup.disabled = true;
+            socket.emit('checkGroupMembership', { groupId, number });
+        });
+
+        socket.on('groupMembershipResult', data => {
+            btnCheckGroup.disabled = false;
+            checkResultContainer.classList.remove('hidden');
+            
+            if (data.isMember) {
+                checkResultContainer.className = 'mt-6 rounded-xl p-5 border border-green-200 bg-green-50 text-green-800 text-sm shadow-sm';
+                checkResultContainer.innerHTML = `
+                    <div class="flex items-center gap-2 font-bold mb-2 text-green-700">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                        Found Match
+                    </div>
+                    The number <code class="bg-green-200 px-1 py-0.5 rounded text-green-900">${data.number}</code> is an active member of <strong>${data.groupName}</strong>.
+                `;
+            } else {
+                checkResultContainer.className = 'mt-6 rounded-xl p-5 border border-yellow-200 bg-yellow-50 text-yellow-800 text-sm shadow-sm';
+                checkResultContainer.innerHTML = `
+                    <div class="flex items-center gap-2 font-bold mb-2 text-yellow-700">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        No Match Found
+                    </div>
+                    The number <code class="bg-yellow-200 px-1 py-0.5 rounded text-yellow-900">${data.number}</code> is NOT a member of <strong>${data.groupName}</strong>.
+                `;
+            }
+        });
+
+        socket.on('groupMembershipError', error => {
+            btnCheckGroup.disabled = false;
+            checkResultContainer.className = 'mt-6 rounded-xl p-5 border border-red-200 bg-red-50 text-red-800 text-sm shadow-sm';
+            checkResultContainer.textContent = `Error: ${error}`;
+            checkResultContainer.classList.remove('hidden');
         });
 
         socket.on('whatsappDisconnected', reason => {

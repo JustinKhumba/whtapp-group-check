@@ -11,6 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const PORT = Number(process.env.PORT || 3000);
+
 const CHAT_LIMIT = 50;
 const MESSAGE_LIMIT = 100;
 
@@ -21,7 +22,6 @@ let db = null;
 let whatsappReady = false;
 
 // IMPORTANT: Keep the latest QR in memory.
-// If QR is generated before browser connects, browser can still receive it afterward.
 let latestQr = null;
 
 // =====================================================
@@ -80,8 +80,6 @@ function createDatabasePool() {
 
 // =====================================================
 // DATABASE
-// ONLY SAVES: 1. SESSION 2. AUTO REPLIES
-// DOES NOT SAVE: chats, messages, message history
 // =====================================================
 async function initDatabase() {
     try {
@@ -89,9 +87,7 @@ async function initDatabase() {
         await db.query('SELECT 1');
         console.log('MySQL connected.');
 
-        // =================================================
         // SESSIONS
-        // =================================================
         await db.query(`
             CREATE TABLE IF NOT EXISTS sessions (
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -108,9 +104,7 @@ async function initDatabase() {
             COLLATE=utf8mb4_unicode_ci
         `);
 
-        // =================================================
-        // AUTO REPLIES (MULTIPLE RULES PER ACCOUNT)
-        // =================================================
+        // AUTO REPLIES
         let autoReplyExists = false;
         try {
             const [tables] = await db.query(`SHOW TABLES LIKE 'auto_replies'`);
@@ -138,10 +132,8 @@ async function initDatabase() {
             `);
             console.log('Created auto_replies table.');
         } else {
-            // CHECK OLD TABLE STRUCTURE & MIGRATE IF NEEDED
             const [columns] = await db.query(`SHOW COLUMNS FROM auto_replies`);
             const hasId = columns.some(column => column.Field === 'id');
-
             if (!hasId) {
                 console.log('Old auto_replies table detected. Migrating...');
                 await db.query(`
@@ -226,7 +218,6 @@ async function createOrRestoreSession(suppliedToken) {
 
 async function updateSessionAccount(sessionToken, accountNumber) {
     if (!db || !sessionToken || !accountNumber) return;
-    
     try {
         await db.execute(`
             UPDATE sessions
@@ -240,7 +231,6 @@ async function updateSessionAccount(sessionToken, accountNumber) {
 
 async function touchSession(sessionToken) {
     if (!db || !sessionToken) return;
-    
     try {
         await db.execute(`
             UPDATE sessions
@@ -253,7 +243,86 @@ async function touchSession(sessionToken) {
 }
 
 // =====================================================
-// WHATSAPP ACCOUNT
+// AUTO REPLIES
+// =====================================================
+async function getAutoReplies(accountNumber) {
+    if (!db || !accountNumber) return [];
+    try {
+        const [rows] = await db.execute(`
+            SELECT id, enabled, trigger_text AS triggerText, reply_text AS replyText
+            FROM auto_replies
+            WHERE account_number = ?
+            ORDER BY id ASC
+        `, [accountNumber]);
+        
+        return rows.map(row => ({
+            id: Number(row.id),
+            enabled: Boolean(row.enabled),
+            triggerText: String(row.triggerText || ''),
+            replyText: String(row.replyText || '')
+        }));
+    } catch (error) {
+        console.error('getAutoReplies error:', error.message);
+        return [];
+    }
+}
+
+async function addAutoReply(accountNumber, settings) {
+    if (!db || !accountNumber) throw new Error('Database or WhatsApp account is unavailable.');
+    
+    const triggerText = String(settings?.triggerText || '').trim();
+    const replyText = String(settings?.replyText || '').trim();
+    const enabled = settings?.enabled !== false;
+    
+    if (!triggerText) throw new Error('Trigger cannot be empty.');
+    if (!replyText) throw new Error('Response cannot be empty.');
+    if (triggerText.length > 255) throw new Error('Trigger is too long.');
+    
+    try {
+        await db.execute(`
+            INSERT INTO auto_replies (account_number, enabled, trigger_text, reply_text)
+            VALUES (?, ?, ?, ?)
+        `, [accountNumber, enabled ? 1 : 0, triggerText, replyText]);
+    } catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') {
+            throw new Error(`Trigger "${triggerText}" already exists.`);
+        }
+        throw error;
+    }
+    return getAutoReplies(accountNumber);
+}
+
+async function toggleAutoReply(accountNumber, id, enabled) {
+    if (!db || !accountNumber) throw new Error('Database or WhatsApp account is unavailable.');
+    
+    const autoReplyId = Number(id);
+    if (!Number.isInteger(autoReplyId) || autoReplyId <= 0) throw new Error('Invalid auto reply ID.');
+    
+    await db.execute(`
+        UPDATE auto_replies
+        SET enabled = ?
+        WHERE id = ? AND account_number = ?
+    `, [enabled ? 1 : 0, autoReplyId, accountNumber]);
+    
+    return getAutoReplies(accountNumber);
+}
+
+async function deleteAutoReply(accountNumber, id) {
+    if (!db || !accountNumber) throw new Error('Database or WhatsApp account is unavailable.');
+    
+    const autoReplyId = Number(id);
+    if (!Number.isInteger(autoReplyId) || autoReplyId <= 0) throw new Error('Invalid auto reply ID.');
+    
+    await db.execute(`
+        DELETE FROM auto_replies
+        WHERE id = ? AND account_number = ?
+    `, [autoReplyId, accountNumber]);
+    
+    return getAutoReplies(accountNumber);
+}
+
+// =====================================================
+// WHATSAPP ACCOUNT & DATA
 // =====================================================
 function getAccountNumber() {
     const user = client?.info?.wid?.user;
@@ -261,13 +330,8 @@ function getAccountNumber() {
     return `+${user}`;
 }
 
-// =====================================================
-// LIVE RECENT CHATS (NO DATABASE)
-// =====================================================
 async function getRecentChatsDirect() {
-    if (!client.pupPage) {
-        throw new Error('WhatsApp browser page is not ready.');
-    }
+    if (!client.pupPage) throw new Error('WhatsApp browser page is not ready.');
     
     const result = await client.pupPage.evaluate(() => {
         const collections = window.require('WAWebCollections');
@@ -279,13 +343,9 @@ async function getRecentChatsDirect() {
         return models.map(chat => {
             let id = null;
             try {
-                if (chat.id && chat.id._serialized) {
-                    id = chat.id._serialized;
-                } else if (chat.id && chat.id.user && chat.id.server) {
-                    id = `${chat.id.user}@${chat.id.server}`;
-                } else if (chat.id && chat.id.user) {
-                    id = String(chat.id.user);
-                }
+                if (chat.id && chat.id._serialized) id = chat.id._serialized;
+                else if (chat.id && chat.id.user && chat.id.server) id = `${chat.id.user}@${chat.id.server}`;
+                else if (chat.id && chat.id.user) id = String(chat.id.user);
             } catch (_) { id = null; }
             
             if (!id) return null;
@@ -299,6 +359,18 @@ async function getRecentChatsDirect() {
             let unread = 0;
             try { unread = Number(chat.unreadCount || 0); } catch (_) {}
             
+            // Extract the last message preview
+            let lastMessage = '';
+            try {
+                if (chat.msgs && typeof chat.msgs.getModelsArray === 'function') {
+                    const msgs = chat.msgs.getModelsArray();
+                    if (msgs.length > 0) {
+                        const lastMsg = msgs[msgs.length - 1];
+                        lastMessage = lastMsg.body != null ? String(lastMsg.body) : String(lastMsg.type || '');
+                    }
+                }
+            } catch (_) {}
+            
             const isGroup = String(id).endsWith('@g.us');
             
             return {
@@ -306,7 +378,8 @@ async function getRecentChatsDirect() {
                 name: String(name || 'Unknown'),
                 timestamp,
                 unread,
-                isGroup
+                isGroup,
+                lastMessage
             };
         }).filter(Boolean);
     });
@@ -316,19 +389,12 @@ async function getRecentChatsDirect() {
         .slice(0, CHAT_LIMIT);
 }
 
-// =====================================================
-// LIVE MESSAGES (NO DATABASE)
-// =====================================================
 async function fetchMessagesForChat(chatId) {
-    if (!client.pupPage) {
-        throw new Error('WhatsApp browser page is not ready.');
-    }
+    if (!client.pupPage) throw new Error('WhatsApp browser page is not ready.');
     
     const messages = await client.pupPage.evaluate((requestedChatId, limit) => {
         const collections = window.require('WAWebCollections');
-        if (!collections || !collections.Chat) {
-            throw new Error('WAWebCollections.Chat is unavailable.');
-        }
+        if (!collections || !collections.Chat) throw new Error('WAWebCollections.Chat is unavailable.');
         
         const models = collections.Chat.getModelsArray();
         const chat = models.find(item => {
@@ -338,14 +404,10 @@ async function fetchMessagesForChat(chatId) {
                     (item.id._serialized === requestedChatId ||
                     (item.id.user && item.id.server && `${item.id.user}@${item.id.server}` === requestedChatId))
                 );
-            } catch (_) {
-                return false;
-            }
+            } catch (_) { return false; }
         });
         
-        if (!chat) {
-            throw new Error('Chat not found in WhatsApp Web.');
-        }
+        if (!chat) throw new Error('Chat not found in WhatsApp Web.');
         
         let messageModels = [];
         try {
@@ -385,99 +447,10 @@ async function fetchMessagesForChat(chatId) {
 }
 
 // =====================================================
-// AUTO REPLIES
-// =====================================================
-async function getAutoReplies(accountNumber) {
-    if (!db || !accountNumber) return [];
-    
-    try {
-        const [rows] = await db.execute(`
-            SELECT id, enabled, trigger_text AS triggerText, reply_text AS replyText
-            FROM auto_replies
-            WHERE account_number = ?
-            ORDER BY id ASC
-        `, [accountNumber]);
-        
-        return rows.map(row => ({
-            id: Number(row.id),
-            enabled: Boolean(row.enabled),
-            triggerText: String(row.triggerText || ''),
-            replyText: String(row.replyText || '')
-        }));
-    } catch (error) {
-        console.error('getAutoReplies error:', error.message);
-        return [];
-    }
-}
-
-async function addAutoReply(accountNumber, settings) {
-    if (!db || !accountNumber) {
-        throw new Error('Database or WhatsApp account is unavailable.');
-    }
-    
-    const triggerText = String(settings?.triggerText || '').trim();
-    const replyText = String(settings?.replyText || '').trim();
-    const enabled = settings?.enabled !== false;
-    
-    if (!triggerText) throw new Error('Trigger cannot be empty.');
-    if (!replyText) throw new Error('Response cannot be empty.');
-    if (triggerText.length > 255) throw new Error('Trigger is too long.');
-    
-    try {
-        await db.execute(`
-            INSERT INTO auto_replies (account_number, enabled, trigger_text, reply_text)
-            VALUES (?, ?, ?, ?)
-        `, [accountNumber, enabled ? 1 : 0, triggerText, replyText]);
-    } catch (error) {
-        if (error.code === 'ER_DUP_ENTRY') {
-            throw new Error(`Trigger "${triggerText}" already exists.`);
-        }
-        throw error;
-    }
-    return getAutoReplies(accountNumber);
-}
-
-async function toggleAutoReply(accountNumber, id, enabled) {
-    if (!db || !accountNumber) {
-        throw new Error('Database or WhatsApp account is unavailable.');
-    }
-    
-    const autoReplyId = Number(id);
-    if (!Number.isInteger(autoReplyId) || autoReplyId <= 0) {
-        throw new Error('Invalid auto reply ID.');
-    }
-    
-    await db.execute(`
-        UPDATE auto_replies
-        SET enabled = ?
-        WHERE id = ? AND account_number = ?
-    `, [enabled ? 1 : 0, autoReplyId, accountNumber]);
-    
-    return getAutoReplies(accountNumber);
-}
-
-async function deleteAutoReply(accountNumber, id) {
-    if (!db || !accountNumber) {
-        throw new Error('Database or WhatsApp account is unavailable.');
-    }
-    
-    const autoReplyId = Number(id);
-    if (!Number.isInteger(autoReplyId) || autoReplyId <= 0) {
-        throw new Error('Invalid auto reply ID.');
-    }
-    
-    await db.execute(`
-        DELETE FROM auto_replies
-        WHERE id = ? AND account_number = ?
-    `, [autoReplyId, accountNumber]);
-    
-    return getAutoReplies(accountNumber);
-}
-
-// =====================================================
 // WHATSAPP CLIENT
 // =====================================================
 const authPath = process.env.WWEBJS_AUTH_PATH || path.join(__dirname, '.wwebjs_auth');
+
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: authPath }),
     puppeteer: {
@@ -567,6 +540,60 @@ io.on('connection', async socket => {
             socket.emit('messagesError', error.message);
         }
     });
+
+    // =====================================================
+    // NEW FEATURE: GROUP MEMBERSHIP CHECKER
+    // =====================================================
+    socket.on('checkGroupMembership', async data => {
+        try {
+            const { number, groupId } = data;
+            
+            if (!whatsappReady) {
+                socket.emit('groupMembershipError', 'WhatsApp is not ready. Please wait or relogin.');
+                return;
+            }
+            if (!number || !groupId) {
+                socket.emit('groupMembershipError', 'Both Phone Number and Group ID are required.');
+                return;
+            }
+
+            // Format Number: Strip non-digits and append @c.us for internal matching
+            let formattedNumber = String(number).replace(/\D/g, '');
+            if (!formattedNumber) {
+                socket.emit('groupMembershipError', 'Invalid phone number format.');
+                return;
+            }
+            if (!formattedNumber.endsWith('@c.us')) formattedNumber += '@c.us';
+
+            // Attempt to retrieve the specified group
+            const chat = await client.getChatById(groupId);
+            if (!chat || !chat.isGroup) {
+                socket.emit('groupMembershipError', 'Target chat not found or is not a group.');
+                return;
+            }
+
+            // Iterate participants to check membership
+            let isMember = false;
+            for (let participant of chat.participants) {
+                // Ensure robust checking by _serialized ID or fallback raw user property
+                if (participant.id._serialized === formattedNumber || participant.id.user === formattedNumber.replace('@c.us', '')) {
+                    isMember = true;
+                    break;
+                }
+            }
+
+            socket.emit('groupMembershipResult', {
+                number: formattedNumber.replace('@c.us', ''),
+                isMember,
+                groupId,
+                groupName: chat.name || 'Unknown Group'
+            });
+
+        } catch (error) {
+            console.error('checkGroupMembership error:', error.message);
+            socket.emit('groupMembershipError', `Failed to check membership: ${error.message}`);
+        }
+    });
     
     socket.on('getAutoReplies', async () => {
         try {
@@ -635,15 +662,11 @@ io.on('connection', async socket => {
     });
 });
 
-// =====================================================
-// SEND LIVE CHATS
-// =====================================================
 async function sendLiveChats(socket) {
     if (!whatsappReady) {
         socket.emit('message', 'WhatsApp is not ready yet.');
         return;
     }
-    
     try {
         const chats = await getRecentChatsDirect();
         socket.emit('chats', chats);
@@ -658,9 +681,7 @@ async function sendLiveChats(socket) {
 // WHATSAPP EVENTS
 // =====================================================
 client.on('qr', async qr => {
-    console.log('====================================');
     console.log('NEW WHATSAPP QR RECEIVED');
-    console.log('====================================');
     try {
         const url = await qrcode.toDataURL(qr);
         latestQr = url;
@@ -695,10 +716,8 @@ client.on('ready', async () => {
     latestQr = null;
     const accountNumber = getAccountNumber();
     
-    console.log('====================================');
     console.log('WHATSAPP READY');
     console.log('CONNECTED AS:', accountNumber);
-    console.log('====================================');
     
     for (const [, socket] of io.sockets.sockets) {
         socket.data.accountNumber = accountNumber;

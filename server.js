@@ -87,24 +87,42 @@ client.on('ready', async () => {
     setTimeout(async () => {
         io.emit('message', 'Fetching chats...');
         try {
-            // Fetch chats from the account
-            const chats = await client.getChats();
+            // Fetch chats from the account using a safe fallback approach to prevent 'r' crashes
+            let chatData = [];
             
-            // Map down the complex chat objects to simple data for the frontend
-            // Limit to the 50 most recent chats to prevent WebSocket/Memory overload
-            const chatData = chats.slice(0, 50).map(chat => ({
-                name: chat.name || (chat.id && chat.id.user) || 'Unknown',
-                id: chat.id && chat.id._serialized,
-                unread: chat.unreadCount || 0
-            }));
+            try {
+                // 1. Attempt standard library method first
+                const chats = await client.getChats();
+                chatData = chats.slice(0, 50).map(chat => ({
+                    name: chat.name || (chat.id && chat.id.user) || 'Unknown',
+                    id: chat.id && chat.id._serialized,
+                    unread: chat.unreadCount || 0
+                }));
+            } catch (err) {
+                console.log('Standard getChats() failed with error:', err.message);
+                console.log('Executing Puppeteer browser fallback to extract chats...');
+                io.emit('message', 'Library format error detected. Using browser fallback...');
+                
+                // 2. Fallback: Manually extract basic chat info directly from WhatsApp's internal store.
+                // This completely bypasses the heavy object serialization that causes the "Error: r" crash.
+                chatData = await client.pupPage.evaluate(() => {
+                    if (!window.Store || !window.Store.Chat) return [];
+                    const rawChats = window.Store.Chat.getModelsArray().slice(0, 50);
+                    return rawChats.map(c => ({
+                        name: c.name || c.formattedTitle || (c.id && c.id.user) || 'Unknown',
+                        id: c.id && c.id._serialized,
+                        unread: c.unreadCount || 0
+                    }));
+                });
+            }
             
             // Send chats to the frontend
             io.emit('chats', chatData);
             io.emit('message', `Successfully loaded ${chatData.length} recent chats.`);
         } catch (error) {
-            console.error('Error fetching chats:', error);
+            console.error('Error fetching chats completely:', error);
             // Send the raw error directly to the UI so you can see exactly what failed
-            io.emit('message', `Error fetching chats: ${error.message}`);
+            io.emit('message', `Complete failure fetching chats: ${error.message}`);
         }
     }, 5000); // 5-second buffer delay
 });

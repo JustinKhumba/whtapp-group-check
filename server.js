@@ -83,71 +83,88 @@ client.on('disconnected', (reason) => {
 client.on('ready', async () => {
     console.log('WhatsApp Client is ready!');
     io.emit('ready', `WhatsApp is ready! Connected as ${client.info?.pushname || 'User'}`);
-    io.emit('message', 'Synchronizing data... Please wait. This can take up to a minute on cloud servers.');
+    io.emit('message', 'Synchronizing data... Please wait. Cloud servers may take several minutes on first login.');
 
     let attempts = 0;
-    const maxAttempts = 12; // Poll 12 times (1 minute total with 5s delays)
+    const maxAttempts = 36; // Poll 36 times (3 minutes total with 5s delays)
 
     const fetchChatsSafely = async () => {
         try {
-            // Promise.race prevents client.getChats() from hanging forever (a known wwebjs bug)
+            // 1. Try Native method with a strict timeout to prevent hangs
             const nativeFetch = client.getChats();
-            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 8000));
+            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 8000));
             
             const chats = await Promise.race([nativeFetch, timeout]);
-            if (!chats || chats.length === 0) throw new Error('Empty array returned natively');
-            
-            return chats.map(chat => ({
-                name: chat.name || (chat.id && chat.id.user) || 'Unknown',
-                id: chat.id && chat.id._serialized,
-                unread: chat.unreadCount || 0,
-                timestamp: chat.timestamp || 0
-            }));
+            if (chats && chats.length > 0) {
+                return {
+                    status: 'success',
+                    data: chats.map(chat => ({
+                        name: chat.name || (chat.id && chat.id.user) || 'Unknown',
+                        id: chat.id && chat.id._serialized,
+                        unread: chat.unreadCount || 0,
+                        timestamp: chat.timestamp || 0
+                    }))
+                };
+            }
+            throw new Error('EMPTY_NATIVE');
         } catch (err) {
-            console.log(`Native fetch failed/timed out: ${err.message}. Using ultra-safe browser fallback...`);
+            console.log(`Native fetch issue (${err.message}). Inspecting hidden browser DOM...`);
             
-            // Fallback: Manually extract basic info bypassing Puppeteer serialization limits
+            // 2. Fallback: Inspect the actual browser DOM to see exactly what WhatsApp is doing
             return await client.pupPage.evaluate(() => {
-                if (!window.Store || !window.Store.Chat) return null;
+                // Check if WhatsApp is stuck on the loading/syncing screen
+                const isSyncing = document.querySelector('[role="progressbar"]') || 
+                                  document.body.innerText.includes('Downloading recent messages') || 
+                                  document.body.innerText.includes('Loading your chats');
                 
-                // Handle different internal versions of the WhatsApp Store
+                if (isSyncing) return { status: 'syncing' };
+                
+                if (!window.Store || !window.Store.Chat) return { status: 'no_store' };
+                
                 const rawChats = window.Store.Chat.getModelsArray 
                     ? window.Store.Chat.getModelsArray() 
                     : Object.values(window.Store.Chat._models || {});
                     
-                if (!rawChats || rawChats.length === 0) return null;
+                if (!rawChats || rawChats.length === 0) return { status: 'empty_store' };
 
-                // Extract ONLY primitives to avoid circular JSON stringify crashes
-                return rawChats.map(c => ({
+                // Extract only primitives to bypass Puppeteer serialization crashes
+                const parsedChats = rawChats.map(c => ({
                     name: c.name || c.formattedTitle || (c.id && c.id.user) || 'Unknown',
                     id: c.id && c.id._serialized,
                     unread: c.unreadCount || 0,
                     timestamp: c.t || 0
                 }));
+
+                return { status: 'success', data: parsedChats };
             });
         }
     };
 
     const pollInterval = setInterval(async () => {
         attempts++;
-        io.emit('message', `Fetching chats (Attempt ${attempts}/${maxAttempts})... WhatsApp might still be syncing.`);
         
         try {
-            const chatData = await fetchChatsSafely();
+            const result = await fetchChatsSafely();
             
-            if (chatData && chatData.length > 0) {
+            if (result && result.status === 'success' && result.data && result.data.length > 0) {
                 clearInterval(pollInterval);
                 
                 // Sort by timestamp (newest first) and take top 50
-                const sortedChats = chatData
+                const sortedChats = result.data
                     .sort((a, b) => b.timestamp - a.timestamp)
                     .slice(0, 50);
 
                 io.emit('chats', sortedChats);
                 io.emit('message', `Successfully loaded ${sortedChats.length} recent chats.`);
+            } else if (result && result.status === 'syncing') {
+                io.emit('message', `WhatsApp is still actively downloading messages... (Attempt ${attempts}/${maxAttempts})`);
+            } else if (result && (result.status === 'no_store' || result.status === 'empty_store')) {
+                io.emit('message', `Waiting for WhatsApp database to initialize... (Attempt ${attempts}/${maxAttempts})`);
             } else if (attempts >= maxAttempts) {
                 clearInterval(pollInterval);
-                io.emit('message', 'Chats are empty. WhatsApp may require more time to sync data. Please refresh.');
+                io.emit('message', 'Timeout reached. WhatsApp is taking too long to sync on this server. Please refresh the page to try again.');
+            } else {
+                io.emit('message', `Fetching chats (Attempt ${attempts}/${maxAttempts})...`);
             }
         } catch (error) {
             console.error('Error fetching chats completely:', error);

@@ -171,7 +171,7 @@
                 <section class="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div>
                         <h2 class="font-semibold text-slate-800 text-lg">Group Membership Checker</h2>
-                        <p class="mt-1 text-sm text-slate-500">Check if a specific phone number is a participant of a group.</p>
+                        <p class="mt-1 text-sm text-slate-500">Check a phone number against a temporarily cached group member list.</p>
                     </div>
 
                     <div class="mt-6 space-y-5">
@@ -181,12 +181,14 @@
                             <p class="text-xs text-slate-400 mt-1">Make sure the ID ends with @g.us</p>
                         </div>
                         <div>
-                            <label class="mb-1 block text-sm font-semibold text-slate-600">Target Phone Number</label>
-                            <input id="check-phone-number" type="text" class="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm outline-none focus:border-slate-400 focus:bg-white transition" placeholder="e.g. 1234567890">
+                            <label class="mb-1 block text-sm font-semibold text-slate-600">Phone Number (no country code)</label>
+                            <input id="check-phone-number" type="text" inputmode="numeric" autocomplete="off" class="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm outline-none focus:border-slate-400 focus:bg-white transition" placeholder="e.g. 9876543210">
+                            <p class="text-xs text-slate-400 mt-1">Enter the local number only. Do not enter +91 or another country code.</p>
                         </div>
                         <button id="btn-check-group" class="w-full md:w-auto rounded-lg bg-slate-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 transition shadow-sm">
-                            Verify Membership
+                            Check Membership
                         </button>
+                        <p id="group-cache-status" class="text-xs text-slate-400"></p>
                     </div>
 
                     <div id="check-result-container" class="mt-6 hidden rounded-xl p-4 border shadow-sm transition-all duration-300">
@@ -569,58 +571,118 @@
         // -------------------------
         // Group Membership Check
         // -------------------------
+        const groupCacheStatus = document.getElementById('group-cache-status');
+
+        function setGroupCheckResult(type, html) {
+            const classes = {
+                success: 'mt-6 rounded-xl p-5 border border-green-200 bg-green-50 text-green-800 text-sm shadow-sm',
+                miss: 'mt-6 rounded-xl p-5 border border-yellow-200 bg-yellow-50 text-yellow-800 text-sm shadow-sm',
+                info: 'mt-6 rounded-xl p-4 border border-blue-200 bg-blue-50 text-blue-700 text-sm shadow-sm',
+                error: 'mt-6 rounded-xl p-5 border border-red-200 bg-red-50 text-red-800 text-sm shadow-sm'
+            };
+
+            checkResultContainer.className = classes[type] || classes.info;
+            checkResultContainer.innerHTML = html;
+            checkResultContainer.classList.remove('hidden');
+        }
+
+        function escapeHtml(value) {
+            const div = document.createElement('div');
+            div.textContent = String(value ?? '');
+            return div.innerHTML;
+        }
+
         btnCheckGroup.addEventListener('click', () => {
             const groupId = checkGroupId.value.trim();
             const number = checkPhoneNumber.value.trim();
 
             if (!groupId || !number) {
-                checkResultContainer.className = 'mt-6 rounded-xl p-4 border border-red-200 bg-red-50 text-red-700 text-sm shadow-sm';
-                checkResultContainer.textContent = 'Please provide both Group ID and Target Phone Number.';
-                checkResultContainer.classList.remove('hidden');
+                setGroupCheckResult(
+                    'error',
+                    'Please provide both Group ID and Phone Number.'
+                );
                 return;
             }
 
-            checkResultContainer.className = 'mt-6 rounded-xl p-4 border border-blue-200 bg-blue-50 text-blue-700 text-sm shadow-sm';
-            checkResultContainer.textContent = 'Verifying membership...';
-            checkResultContainer.classList.remove('hidden');
+            setGroupCheckResult(
+                'info',
+                'Checking the cached member list...'
+            );
 
             btnCheckGroup.disabled = true;
+            groupCacheStatus.textContent = '';
             socket.emit('checkGroupMembership', { groupId, number });
+        });
+
+        checkPhoneNumber.addEventListener('keydown', event => {
+            if (event.key === 'Enter' && !btnCheckGroup.disabled) {
+                btnCheckGroup.click();
+            }
         });
 
         socket.on('groupMembershipResult', data => {
             btnCheckGroup.disabled = false;
-            checkResultContainer.classList.remove('hidden');
-            
-            if (data.isMember) {
-                checkResultContainer.className = 'mt-6 rounded-xl p-5 border border-green-200 bg-green-50 text-green-800 text-sm shadow-sm';
-                checkResultContainer.innerHTML = `
-                    <div class="flex items-center gap-2 font-bold mb-2 text-green-700">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                        Found Match
-                    </div>
-                    The number <code class="bg-green-200 px-1 py-0.5 rounded text-green-900">${data.number}</code> is an active member of <strong>${data.groupName}</strong>.
-                `;
+
+            const number = escapeHtml(data?.number || '');
+            const groupName = escapeHtml(data?.groupName || 'Unknown Group');
+            const memberCount = Number(data?.memberCount || 0);
+            const resolvedPhoneCount = Number(data?.resolvedPhoneCount || 0);
+            const age = Number(data?.cacheAgeSeconds || 0);
+            const ttl = Number(data?.cacheTtlSeconds || 0);
+
+            const sourceText = data?.fromCache
+                ? `Used cached member list (${age}s old).`
+                : 'Member list refreshed from WhatsApp for this check.';
+
+            groupCacheStatus.textContent =
+                `${sourceText} ${memberCount} members, ${resolvedPhoneCount} phone numbers resolved. Refresh after ${Math.max(0, ttl - age)}s.`;
+
+            if (data?.isMember) {
+                setGroupCheckResult(
+                    'success',
+                    `
+                        <div class="flex items-center gap-2 font-bold mb-2 text-green-700">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            Member Found
+                        </div>
+                        <div>
+                            <code class="bg-green-200 px-1 py-0.5 rounded text-green-900">${number}</code>
+                            is a member of <strong>${groupName}</strong>.
+                        </div>
+                    `
+                );
             } else {
-                checkResultContainer.className = 'mt-6 rounded-xl p-5 border border-yellow-200 bg-yellow-50 text-yellow-800 text-sm shadow-sm';
-                checkResultContainer.innerHTML = `
-                    <div class="flex items-center gap-2 font-bold mb-2 text-yellow-700">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                        No Match Found
-                    </div>
-                    The number <code class="bg-yellow-200 px-1 py-0.5 rounded text-yellow-900">${data.number}</code> is NOT a member of <strong>${data.groupName}</strong>.
-                `;
+                setGroupCheckResult(
+                    'miss',
+                    `
+                        <div class="flex items-center gap-2 font-bold mb-2 text-yellow-700">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                            Not Found
+                        </div>
+                        <div>
+                            <code class="bg-yellow-200 px-1 py-0.5 rounded text-yellow-900">${number}</code>
+                            is not found in <strong>${groupName}</strong>'s cached member list.
+                        </div>
+                    `
+                );
             }
         });
 
         socket.on('groupMembershipError', error => {
             btnCheckGroup.disabled = false;
-            checkResultContainer.className = 'mt-6 rounded-xl p-5 border border-red-200 bg-red-50 text-red-800 text-sm shadow-sm';
-            checkResultContainer.textContent = `Error: ${error}`;
-            checkResultContainer.classList.remove('hidden');
+            groupCacheStatus.textContent = '';
+
+            setGroupCheckResult(
+                'error',
+                `Error: ${escapeHtml(error || 'Failed to check membership.')}`
+            );
         });
 
-        socket.on('whatsappDisconnected', reason => {
+                socket.on('whatsappDisconnected', reason => {
             setStatus(`WhatsApp disconnected: ${reason}`, 'error');
         });
     </script>

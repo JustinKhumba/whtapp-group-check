@@ -17,12 +17,29 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Add global error handlers to prevent the entire server from crashing
+process.on('unhandledRejection', error => {
+    console.error('Unhandled Promise Rejection:', error);
+});
+process.on('uncaughtException', error => {
+    console.error('Uncaught Exception:', error);
+});
+
 // LocalAuth saves the session locally so you don't have to scan the QR code on every server restart
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
-        // Essential flags for running Puppeteer inside Docker/Railway environments
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+        // Additional flags to save memory and ensure compatibility inside Docker/Railway
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process', // heavily reduces memory usage
+            '--disable-gpu'
+        ]
     }
 });
 
@@ -56,6 +73,11 @@ client.on('authenticated', () => {
 client.on('auth_failure', msg => {
     console.error('AUTHENTICATION FAILURE', msg);
     io.emit('message', 'Authentication failed! Please restart the server.');
+});
+
+client.on('disconnected', (reason) => {
+    console.log('Client was logged out or disconnected', reason);
+    io.emit('message', 'WhatsApp disconnected. Restarting...');
 });
 
 client.on('ready', async () => {

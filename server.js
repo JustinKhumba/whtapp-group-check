@@ -14,12 +14,14 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Prevent Node.js from crashing if Puppeteer throws unexpected internal errors
 process.on('unhandledRejection', error => {
     console.error('Unhandled Promise Rejection:', error);
 });
+
 process.on('uncaughtException', error => {
     console.error('Uncaught Exception:', error);
 });
@@ -81,56 +83,86 @@ client.on('disconnected', (reason) => {
 client.on('ready', async () => {
     console.log('WhatsApp Client is ready!');
     io.emit('ready', `WhatsApp is ready! Connected as ${client.info?.pushname || 'User'}`);
-    io.emit('message', 'Synchronizing data... Please wait a moment.');
+    io.emit('message', 'Synchronizing data... Please wait. This can take up to a minute on cloud servers.');
 
-    // Add a small delay to allow WA Web to finish syncing chats in the background
-    setTimeout(async () => {
-        io.emit('message', 'Fetching chats...');
+    let attempts = 0;
+    const maxAttempts = 12; // Poll 12 times (1 minute total with 5s delays)
+
+    const fetchChatsSafely = async () => {
         try {
-            // Fetch chats from the account using a safe fallback approach to prevent 'r' crashes
-            let chatData = [];
+            // Promise.race prevents client.getChats() from hanging forever (a known wwebjs bug)
+            const nativeFetch = client.getChats();
+            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 8000));
             
-            try {
-                // 1. Attempt standard library method first
-                const chats = await client.getChats();
-                chatData = chats.slice(0, 50).map(chat => ({
-                    name: chat.name || (chat.id && chat.id.user) || 'Unknown',
-                    id: chat.id && chat.id._serialized,
-                    unread: chat.unreadCount || 0
-                }));
-            } catch (err) {
-                console.log('Standard getChats() failed with error:', err.message);
-                console.log('Executing Puppeteer browser fallback to extract chats...');
-                io.emit('message', 'Library format error detected. Using browser fallback...');
+            const chats = await Promise.race([nativeFetch, timeout]);
+            if (!chats || chats.length === 0) throw new Error('Empty array returned natively');
+            
+            return chats.map(chat => ({
+                name: chat.name || (chat.id && chat.id.user) || 'Unknown',
+                id: chat.id && chat.id._serialized,
+                unread: chat.unreadCount || 0,
+                timestamp: chat.timestamp || 0
+            }));
+        } catch (err) {
+            console.log(`Native fetch failed/timed out: ${err.message}. Using ultra-safe browser fallback...`);
+            
+            // Fallback: Manually extract basic info bypassing Puppeteer serialization limits
+            return await client.pupPage.evaluate(() => {
+                if (!window.Store || !window.Store.Chat) return null;
                 
-                // 2. Fallback: Manually extract basic chat info directly from WhatsApp's internal store.
-                // This completely bypasses the heavy object serialization that causes the "Error: r" crash.
-                chatData = await client.pupPage.evaluate(() => {
-                    if (!window.Store || !window.Store.Chat) return [];
-                    const rawChats = window.Store.Chat.getModelsArray().slice(0, 50);
-                    return rawChats.map(c => ({
-                        name: c.name || c.formattedTitle || (c.id && c.id.user) || 'Unknown',
-                        id: c.id && c.id._serialized,
-                        unread: c.unreadCount || 0
-                    }));
-                });
-            }
+                // Handle different internal versions of the WhatsApp Store
+                const rawChats = window.Store.Chat.getModelsArray 
+                    ? window.Store.Chat.getModelsArray() 
+                    : Object.values(window.Store.Chat._models || {});
+                    
+                if (!rawChats || rawChats.length === 0) return null;
+
+                // Extract ONLY primitives to avoid circular JSON stringify crashes
+                return rawChats.map(c => ({
+                    name: c.name || c.formattedTitle || (c.id && c.id.user) || 'Unknown',
+                    id: c.id && c.id._serialized,
+                    unread: c.unreadCount || 0,
+                    timestamp: c.t || 0
+                }));
+            });
+        }
+    };
+
+    const pollInterval = setInterval(async () => {
+        attempts++;
+        io.emit('message', `Fetching chats (Attempt ${attempts}/${maxAttempts})... WhatsApp might still be syncing.`);
+        
+        try {
+            const chatData = await fetchChatsSafely();
             
-            // Send chats to the frontend
-            io.emit('chats', chatData);
-            io.emit('message', `Successfully loaded ${chatData.length} recent chats.`);
+            if (chatData && chatData.length > 0) {
+                clearInterval(pollInterval);
+                
+                // Sort by timestamp (newest first) and take top 50
+                const sortedChats = chatData
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .slice(0, 50);
+
+                io.emit('chats', sortedChats);
+                io.emit('message', `Successfully loaded ${sortedChats.length} recent chats.`);
+            } else if (attempts >= maxAttempts) {
+                clearInterval(pollInterval);
+                io.emit('message', 'Chats are empty. WhatsApp may require more time to sync data. Please refresh.');
+            }
         } catch (error) {
             console.error('Error fetching chats completely:', error);
-            // Send the raw error directly to the UI so you can see exactly what failed
-            io.emit('message', `Complete failure fetching chats: ${error.message}`);
+            if (attempts >= maxAttempts) {
+                clearInterval(pollInterval);
+                io.emit('message', `Complete failure fetching chats: ${error.message}`);
+            }
         }
-    }, 5000); // 5-second buffer delay
+    }, 5000); // 5-second polling interval
 });
 
 // Catch any initialization errors so they don't crash the Node process
 client.initialize().catch(err => {
     console.error("Failed to initialize WhatsApp client:", err);
-    io.emit('message', `Startup Error: ${err.message}. Check Server Logs.`);
+    // Note: Do not emit here immediately if io isn't bound, rely on logs
 });
 
 server.listen(PORT, () => {

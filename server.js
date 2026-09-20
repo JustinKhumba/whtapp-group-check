@@ -1,142 +1,140 @@
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const { Server } = require('socket.io');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-    cors: { origin: '*' }
-});
+const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
 
-// Serve static files (including index.html)
-app.use(express.static(__dirname));
+// Serve static files from the 'public' directory
+app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/index.html');
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Configure WhatsApp Client with Railway/Docker compatibility
+// Prevent Node.js from crashing if Puppeteer throws unexpected internal errors
+process.on('unhandledRejection', error => {
+    console.error('Unhandled Promise Rejection:', error);
+});
+process.on('uncaughtException', error => {
+    console.error('Uncaught Exception:', error);
+});
+
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        // CRITICAL FOR RAILWAY: Use the Chromium path provided by Nixpacks, if available
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+            // REMOVED: '--single-process' which causes massive WA Web slowdowns/hangs
+        ]
     }
 });
 
-// Socket.io Connection
 io.on('connection', (socket) => {
-    console.log('Frontend client connected to Socket.IO');
+    console.log('Frontend connected via WebSockets');
+    socket.emit('message', 'Connecting to WhatsApp Client...');
+    
+    // Check if client is already ready upon a new frontend connection
+    if (client.info && client.info.pushname) {
+        socket.emit('ready', `WhatsApp is ready! Connected as ${client.info.pushname}`);
+    }
 });
 
-// WhatsApp Events
-client.on('qr', async (qr) => {
-    console.log('QR Code received');
-    try {
-        const url = await qrcode.toDataURL(qr);
-        io.emit('qr', url);
-    } catch (err) {
-        console.error('Error generating QR code URL:', err);
-        io.emit('message', 'Error displaying QR code');
-    }
+client.on('qr', (qr) => {
+    console.log('QR Code generated. Waiting for scan...');
+    // Convert raw QR string to a base64 image URL to show on the frontend
+    qrcode.toDataURL(qr, (err, url) => {
+        if (!err) {
+            io.emit('qr', url);
+            io.emit('message', 'Please scan the QR code with your WhatsApp app.');
+        }
+    });
 });
 
 client.on('authenticated', () => {
-    console.log('Authenticated successfully');
-    io.emit('message', 'Authenticated successfully, initializing...');
+    console.log('WhatsApp successfully authenticated!');
+    io.emit('message', 'Authenticated successfully! Loading...');
 });
 
 client.on('auth_failure', msg => {
-    console.error('Authentication failure', msg);
-    io.emit('message', 'Authentication failure: ' + msg);
+    console.error('AUTHENTICATION FAILURE', msg);
+    io.emit('message', 'Authentication failed! Please restart the server.');
 });
 
-// --- UPDATED READY EVENT LOGIC ---
+client.on('disconnected', (reason) => {
+    console.log('Client was logged out or disconnected', reason);
+    io.emit('message', 'WhatsApp disconnected. Restarting...');
+});
+
 client.on('ready', async () => {
-    console.log('Client is ready!');
-    io.emit('ready', 'WhatsApp is ready! Fetching recent chats...');
+    console.log('WhatsApp Client is ready!');
+    io.emit('ready', `WhatsApp is ready! Connected as ${client.info?.pushname || 'User'}`);
+    io.emit('message', 'Fetching recent chats...');
 
     try {
-        const result = await client.pupPage.evaluate(() => {
+        // Direct browser evaluation fetching straight from WAWebCollections
+        const rawChats = await client.pupPage.evaluate(() => {
             try {
-                let chatModels = [];
-
-                // 1. Attempt the requested WAWebCollections method safely
-                if (typeof window.require === 'function') {
+                const chatModels = window.require('WAWebCollections').Chat.getModelsArray();
+                
+                return chatModels.map(chat => {
                     try {
-                        const WAWebCollections = window.require('WAWebCollections');
-                        if (WAWebCollections && WAWebCollections.Chat) {
-                            chatModels = WAWebCollections.Chat.getModelsArray();
+                        // Safely extract the ID without breaking the loop for malformed chats
+                        let extractedId = null;
+                        if (chat.id) {
+                            if (chat.id._serialized) {
+                                extractedId = chat.id._serialized;
+                            } else if (chat.id.$1) {
+                                extractedId = chat.id.$1;
+                            } else if (chat.id.user && chat.id.server) {
+                                extractedId = `${chat.id.user}@${chat.id.server}`;
+                            } else if (chat.id.user) {
+                                extractedId = chat.id.user;
+                            }
                         }
-                    } catch (e) {
-                        // If window.require fails, ignore and move to fallback
+
+                        // Determine the name based on the specified priority
+                        const chatName = chat.formattedTitle || chat.name || (chat.id && chat.id.user) || 'Unknown';
+                        
+                        // Ensure simple serializeable values
+                        return {
+                            name: chatName,
+                            id: extractedId,
+                            unread: Number(chat.unreadCount || 0),
+                            timestamp: Number(chat.t || 0)
+                        };
+                    } catch (err) {
+                        // Skip malformed individual chats safely
+                        return null; 
                     }
-                }
-
-                // 2. Safe Fallback: WWebJS automatically injects window.Store when 'ready' is fired.
-                // This guarantees we get chats even if Meta removed window.require in your WhatsApp version.
-                if ((!chatModels || chatModels.length === 0) && typeof window.Store !== 'undefined' && window.Store.Chat) {
-                    chatModels = window.Store.Chat.getModelsArray();
-                }
-
-                if (!chatModels || !Array.isArray(chatModels)) {
-                    return { error: 'Could not locate WhatsApp chat models (window.require and window.Store are both unavailable).' };
-                }
-
-                const parsedChats = chatModels.map(chat => {
-                    // 1. Extremely Safe ID extraction
-                    let id = null;
-                    if (chat.id) {
-                        if (typeof chat.id === 'string') {
-                            id = chat.id;
-                        } else if (typeof chat.id === 'object') {
-                            if (chat.id._serialized) id = String(chat.id._serialized);
-                            else if (chat.id.$1) id = String(chat.id.$1);
-                            else if (chat.id.user && chat.id.server) id = `${chat.id.user}@${chat.id.server}`;
-                        }
-                    }
-
-                    // 2. Extremely Safe Name extraction
-                    let name = 'Unknown';
-                    if (typeof chat.formattedTitle === 'string' && chat.formattedTitle) {
-                        name = chat.formattedTitle;
-                    } else if (typeof chat.name === 'string' && chat.name) {
-                        name = chat.name;
-                    } else if (chat.id && typeof chat.id === 'object' && chat.id.user) {
-                        name = String(chat.id.user);
-                    } else if (typeof chat.id === 'string') {
-                        name = chat.id;
-                    }
-
-                    // 3. Return plain serializable data
-                    return {
-                        name: name,
-                        id: id,
-                        unread: Number(chat.unreadCount || 0),
-                        timestamp: Number(chat.t || 0)
-                    };
-                })
-                .filter(chat => chat.id) // Filter out invalid chats
-                .sort((a, b) => b.timestamp - a.timestamp) // Sort by newest timestamp
-                .slice(0, 50); // Keep only the newest 50
-
-                return { data: parsedChats };
+                });
             } catch (err) {
-                // Catch internal browser errors and pass them back as text
-                return { error: 'Browser error: ' + err.toString() };
+                throw new Error(err.message);
             }
         });
 
-        // Check if the browser evaluation returned a managed error
-        if (result.error) {
-            throw new Error(result.error);
-        }
+        // Filter valid results, sort by descending timestamp, and pick the top 50
+        const recentChats = rawChats
+            .filter(chat => chat && chat.id)
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 50);
 
-        const recentChats = result.data;
         console.log(`Found ${recentChats.length} recent chats`);
+        
         io.emit('chats', recentChats);
         io.emit('message', `Successfully loaded ${recentChats.length} recent chats.`);
 
@@ -145,17 +143,12 @@ client.on('ready', async () => {
         io.emit('message', `Failed to fetch recent chats: ${error.message}`);
     }
 });
-// ----------------------------------
 
-client.on('disconnected', (reason) => {
-    console.log('Client was logged out', reason);
-    io.emit('message', 'Client disconnected: ' + reason);
+// Catch any initialization errors so they don't crash the Node process
+client.initialize().catch(err => {
+    console.error("Failed to initialize WhatsApp client:", err);
 });
 
-// Initialize WhatsApp Client
-client.initialize();
-
-// Start server
 server.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });

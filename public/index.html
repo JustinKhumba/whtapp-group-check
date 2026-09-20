@@ -1,460 +1,1284 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WhatsApp Web Integration</title>
+    <meta charset="UTF-8">
 
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/socket.io/socket.io.js"></script>
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
-  <style>
-    * { box-sizing: border-box; }
+    <title>WhatsApp Web</title>
 
-    body {
-      margin: 0;
-      background: #f8fafc;
-      color: #0f172a;
-      font-family: Arial, Helvetica, sans-serif;
-    }
+    <script src="https://cdn.tailwindcss.com"></script>
 
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
-    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    <script src="/socket.io/socket.io.js"></script>
 
-    .message-row {
-      display: flex;
-      margin: 6px 0;
-    }
+    <style>
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
 
-    .message-row.me {
-      justify-content: flex-end;
-    }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
 
-    .message-bubble {
-      max-width: 82%;
-      padding: 8px 11px;
-      border-radius: 12px;
-      background: #ffffff;
-      border: 1px solid #e2e8f0;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
 
-    .message-row.me .message-bubble {
-      background: #dcfce7;
-      border-color: #bbf7d0;
-    }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
 
-    .message-meta {
-      margin-top: 3px;
-      font-size: 10px;
-      color: #64748b;
-      text-align: right;
-    }
-  </style>
+        .message-in {
+            background: white;
+        }
+
+        .message-out {
+            background: #dcf8c6;
+        }
+    </style>
 </head>
 
-<body class="min-h-screen p-4 md:p-6">
-  <div class="mx-auto max-w-6xl">
+<body
+    class="min-h-screen bg-slate-100 text-slate-800"
+>
 
-    <div class="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div class="text-xl font-bold text-slate-800">WhatsApp Test</div>
-          <div id="connected-as" class="mt-1 text-sm font-semibold text-slate-500">
-            CONNECTED AS —
-          </div>
-        </div>
+    <div
+        class="mx-auto flex min-h-screen w-full max-w-6xl flex-col"
+    >
 
-        <button
-          id="refresh-chats"
-          class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-          type="button"
+        <!-- HEADER -->
+
+        <header
+            class="border-b border-slate-200 bg-white px-4 py-4 shadow-sm"
         >
-          Refresh Chats
-        </button>
-      </div>
 
-      <div
-        id="status-message"
-        class="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm font-medium text-blue-700"
-      >
-        Connecting to Server...
-      </div>
-    </div>
+            <div
+                class="flex items-center justify-between gap-4"
+            >
 
-    <div id="qr-container" class="hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <p class="mb-4 text-center text-sm text-slate-500">
-        Open WhatsApp on your phone → Settings → Linked Devices → Link a Device
-      </p>
+                <div>
 
-      <div class="flex justify-center">
-        <div class="rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
-          <img
-            id="qr-image"
-            src=""
-            alt="Scan this QR Code"
-            class="h-56 w-56 object-contain"
-          >
-        </div>
-      </div>
-    </div>
+                    <h1
+                        class="text-xl font-bold"
+                    >
+                        WhatsApp Web
+                    </h1>
 
-    <div id="app-container" class="hidden grid gap-4 lg:grid-cols-[360px_1fr]">
+                    <div
+                        id="connected-account"
+                        class="mt-1 text-sm font-semibold text-slate-500"
+                    >
+                        CONNECTED AS —
+                    </div>
 
-      <!-- Recent chats -->
-      <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-lg font-semibold text-slate-700">Recent Chats</h2>
-          <span class="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold text-slate-500">
-            <span id="chat-count">0</span> Total
-          </span>
-        </div>
+                </div>
 
-        <ul
-          id="chats-list"
-          class="h-[70vh] min-h-[420px] divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-100 bg-slate-50"
-        ></ul>
-      </section>
+                <button
+                    id="refresh-chats"
+                    type="button"
+                    class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                >
+                    Refresh
+                </button>
 
-      <!-- Messages -->
-      <section class="flex min-h-[70vh] flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="border-b border-slate-200 p-4">
-          <div id="selected-chat-name" class="font-semibold text-slate-800">
-            Select a chat
-          </div>
-          <div id="selected-chat-id" class="mt-1 truncate text-xs text-slate-400"></div>
-        </div>
+            </div>
+
+        </header>
+
+
+        <!-- STATUS -->
 
         <div
-          id="messages-list"
-          class="flex-1 overflow-y-auto bg-slate-50 p-4"
+            id="status-message"
+            class="mx-4 mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-medium text-blue-700"
         >
-          <div class="flex h-full items-center justify-center text-sm text-slate-400">
-            Click a recent chat to load its messages.
-          </div>
+            Connecting to Server...
         </div>
-      </section>
+
+
+        <!-- QR -->
+
+        <section
+            id="qr-container"
+            class="mx-4 mt-4 hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+        >
+
+            <p
+                class="mb-4 text-center text-sm text-slate-500"
+            >
+                Open WhatsApp on your phone →
+                Settings →
+                Linked Devices →
+                Link a Device
+            </p>
+
+            <div
+                class="flex justify-center"
+            >
+                <img
+                    id="qr-image"
+                    src=""
+                    alt="WhatsApp QR Code"
+                    class="h-64 w-64 rounded-xl border border-slate-200"
+                >
+            </div>
+
+        </section>
+
+
+        <!-- MAIN -->
+
+        <main
+            class="grid flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-3"
+        >
+
+            <!-- RECENT CHATS -->
+
+            <section
+                id="chats-container"
+                class="hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-1"
+            >
+
+                <div
+                    class="flex items-center justify-between border-b border-slate-100 px-4 py-4"
+                >
+
+                    <div>
+
+                        <h2
+                            class="font-semibold"
+                        >
+                            Recent Chats
+                        </h2>
+
+                        <p
+                            class="text-xs text-slate-400"
+                        >
+                            <span id="chat-count">
+                                0
+                            </span>
+                            chats
+                        </p>
+
+                    </div>
+
+                </div>
+
+
+                <ul
+                    id="chats-list"
+                    class="max-h-[70vh] overflow-y-auto"
+                >
+                </ul>
+
+            </section>
+
+
+            <!-- MESSAGES -->
+
+            <section
+                id="messages-container"
+                class="hidden flex min-h-[500px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-2"
+            >
+
+                <div
+                    class="border-b border-slate-100 px-4 py-4"
+                >
+
+                    <h2
+                        id="selected-chat-name"
+                        class="font-semibold"
+                    >
+                        Select a chat
+                    </h2>
+
+                    <p
+                        id="selected-chat-id"
+                        class="mt-1 text-xs text-slate-400"
+                    >
+                    </p>
+
+                </div>
+
+
+                <div
+                    id="messages-list"
+                    class="flex-1 space-y-2 overflow-y-auto bg-slate-50 p-4"
+                >
+
+                    <div
+                        class="py-10 text-center text-sm text-slate-400"
+                    >
+                        Select a chat to view messages.
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- AUTO REPLY -->
+
+            <section
+                id="auto-reply-panel"
+                class="hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-1"
+            >
+
+                <div
+                    class="flex items-start justify-between gap-4"
+                >
+
+                    <div>
+
+                        <h2
+                            class="font-semibold text-slate-700"
+                        >
+                            Auto Reply
+                        </h2>
+
+                        <p
+                            class="mt-1 text-xs text-slate-400"
+                        >
+                            Individual users only
+                        </p>
+
+                    </div>
+
+
+                    <label
+                        class="flex cursor-pointer items-center gap-2 text-sm font-semibold"
+                    >
+
+                        <input
+                            id="auto-reply-enabled"
+                            type="checkbox"
+                            class="h-4 w-4"
+                        >
+
+                        Enabled
+
+                    </label>
+
+                </div>
+
+
+                <div
+                    class="mt-5"
+                >
+
+                    <label
+                        for="auto-reply-trigger"
+                        class="mb-1 block text-xs font-semibold text-slate-500"
+                    >
+                        Trigger
+                    </label>
+
+                    <input
+                        id="auto-reply-trigger"
+                        type="text"
+                        value="START"
+                        maxlength="255"
+                        class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-slate-400"
+                        placeholder="START"
+                    >
+
+                </div>
+
+
+                <div
+                    class="mt-4"
+                >
+
+                    <label
+                        for="auto-reply-text"
+                        class="mb-1 block text-xs font-semibold text-slate-500"
+                    >
+                        Response
+                    </label>
+
+                    <textarea
+                        id="auto-reply-text"
+                        rows="5"
+                        class="w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-slate-400"
+                        placeholder="Hello! Thanks for messaging."
+                    ></textarea>
+
+                </div>
+
+
+                <div
+                    class="mt-4 flex items-center gap-3"
+                >
+
+                    <button
+                        id="save-auto-reply"
+                        type="button"
+                        class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                    >
+                        Save Auto Reply
+                    </button>
+
+                    <span
+                        id="auto-reply-status"
+                        class="text-xs text-slate-400"
+                    ></span>
+
+                </div>
+
+            </section>
+
+        </main>
+
     </div>
-  </div>
 
-  <script>
-    const savedSessionToken = localStorage.getItem('wa_session_token') || null;
 
-    const socket = io({
-      auth: {
-        sessionToken: savedSessionToken
-      }
-    });
+    <script>
+        // =================================================
+        // PERSISTENT BROWSER SESSION
+        // =================================================
 
-    const statusMessage = document.getElementById('status-message');
-    const qrContainer = document.getElementById('qr-container');
-    const qrImage = document.getElementById('qr-image');
-    const appContainer = document.getElementById('app-container');
-    const chatsList = document.getElementById('chats-list');
-    const chatCount = document.getElementById('chat-count');
-    const refreshChatsButton = document.getElementById('refresh-chats');
-    const connectedAs = document.getElementById('connected-as');
+        const savedSessionToken =
+            localStorage.getItem(
+                'whatsapp_session_token'
+            );
 
-    const selectedChatName = document.getElementById('selected-chat-name');
-    const selectedChatId = document.getElementById('selected-chat-id');
-    const messagesList = document.getElementById('messages-list');
+        const socket =
+            io({
+                auth: {
+                    sessionToken:
+                        savedSessionToken || null
+                }
+            });
 
-    let chatsById = new Map();
-    let selectedChat = null;
 
-    function setStatus(text, type = 'info') {
-      statusMessage.textContent = text;
+        // =================================================
+        // ELEMENTS
+        // =================================================
 
-      const styles = {
-        info: 'mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm font-medium text-blue-700',
-        success: 'mt-4 rounded-xl border border-green-200 bg-green-50 p-3 text-sm font-medium text-green-700',
-        warning: 'mt-4 rounded-xl border border-yellow-200 bg-yellow-50 p-3 text-sm font-medium text-yellow-800',
-        error: 'mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700'
-      };
+        const statusMessage =
+            document.getElementById(
+                'status-message'
+            );
 
-      statusMessage.className = styles[type] || styles.info;
-    }
+        const qrContainer =
+            document.getElementById(
+                'qr-container'
+            );
 
-    function escapeText(value) {
-      return value === null || value === undefined
-        ? ''
-        : String(value);
-    }
+        const qrImage =
+            document.getElementById(
+                'qr-image'
+            );
 
-    function formatTime(timestamp) {
-      if (!timestamp) return '';
+        const connectedAccount =
+            document.getElementById(
+                'connected-account'
+            );
 
-      const date = new Date(Number(timestamp) * 1000);
-      if (Number.isNaN(date.getTime())) return '';
+        const chatsContainer =
+            document.getElementById(
+                'chats-container'
+            );
 
-      return date.toLocaleString([], {
-        day: '2-digit',
-        month: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    }
+        const chatsList =
+            document.getElementById(
+                'chats-list'
+            );
 
-    function renderChats(chats) {
-      const safeChats = Array.isArray(chats) ? chats : [];
+        const chatCount =
+            document.getElementById(
+                'chat-count'
+            );
 
-      chatsById = new Map(
-        safeChats
-          .filter(chat => chat && chat.id)
-          .map(chat => [String(chat.id), chat])
-      );
+        const messagesContainer =
+            document.getElementById(
+                'messages-container'
+            );
 
-      chatCount.textContent = String(safeChats.length);
-      chatsList.innerHTML = '';
+        const messagesList =
+            document.getElementById(
+                'messages-list'
+            );
 
-      if (!safeChats.length) {
-        const empty = document.createElement('li');
-        empty.className = 'p-5 text-center text-sm text-slate-500';
-        empty.textContent = 'No chats found.';
-        chatsList.appendChild(empty);
-        return;
-      }
+        const selectedChatName =
+            document.getElementById(
+                'selected-chat-name'
+            );
 
-      safeChats.forEach(chat => {
-        const li = document.createElement('li');
-        li.dataset.chatId = String(chat.id);
-        li.className =
-          'cursor-pointer p-3 transition-colors hover:bg-slate-100';
+        const selectedChatId =
+            document.getElementById(
+                'selected-chat-id'
+            );
 
-        const top = document.createElement('div');
-        top.className = 'flex items-center justify-between gap-2';
+        const refreshChatsButton =
+            document.getElementById(
+                'refresh-chats'
+            );
 
-        const name = document.createElement('div');
-        name.className = 'min-w-0 truncate font-semibold text-slate-700';
-        name.textContent = escapeText(chat.name || 'Unknown');
 
-        top.appendChild(name);
+        // =================================================
+        // AUTO REPLY ELEMENTS
+        // =================================================
 
-        const unread = Number(chat.unread || 0);
-        if (unread > 0) {
-          const badge = document.createElement('span');
-          badge.className =
-            'shrink-0 rounded-full bg-green-500 px-2 py-1 text-[10px] font-bold text-white';
-          badge.textContent = String(unread);
-          top.appendChild(badge);
+        const autoReplyPanel =
+            document.getElementById(
+                'auto-reply-panel'
+            );
+
+        const autoReplyEnabled =
+            document.getElementById(
+                'auto-reply-enabled'
+            );
+
+        const autoReplyTrigger =
+            document.getElementById(
+                'auto-reply-trigger'
+            );
+
+        const autoReplyText =
+            document.getElementById(
+                'auto-reply-text'
+            );
+
+        const saveAutoReplyButton =
+            document.getElementById(
+                'save-auto-reply'
+            );
+
+        const autoReplyStatus =
+            document.getElementById(
+                'auto-reply-status'
+            );
+
+
+        let currentChats = [];
+
+        let currentChatId = null;
+
+
+        // =================================================
+        // STATUS HELPERS
+        // =================================================
+
+        function setStatus(
+            text,
+            type = 'info'
+        ) {
+            statusMessage.textContent =
+                text;
+
+            if (
+                type === 'success'
+            ) {
+                statusMessage.className =
+                    'mx-4 mt-4 rounded-xl border border-green-100 bg-green-50 p-4 text-sm font-medium text-green-700';
+            } else if (
+                type === 'error'
+            ) {
+                statusMessage.className =
+                    'mx-4 mt-4 rounded-xl border border-red-100 bg-red-50 p-4 text-sm font-medium text-red-700';
+            } else if (
+                type === 'warning'
+            ) {
+                statusMessage.className =
+                    'mx-4 mt-4 rounded-xl border border-yellow-100 bg-yellow-50 p-4 text-sm font-medium text-yellow-700';
+            } else {
+                statusMessage.className =
+                    'mx-4 mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-medium text-blue-700';
+            }
         }
 
-        const bottom = document.createElement('div');
-        bottom.className = 'mt-1 flex items-center justify-between gap-2';
 
-        const preview = document.createElement('div');
-        preview.className = 'min-w-0 truncate text-xs text-slate-400';
-        preview.textContent =
-          escapeText(chat.lastMessageText || '') || 'Click to load messages';
+        // =================================================
+        // CONNECTION
+        // =================================================
 
-        const time = document.createElement('div');
-        time.className = 'shrink-0 text-[10px] text-slate-400';
-        time.textContent = formatTime(chat.timestamp);
+        socket.on(
+            'connect',
+            () => {
+                setStatus(
+                    'Connected to server. Waiting for WhatsApp...'
+                );
+            }
+        );
 
-        bottom.appendChild(preview);
-        bottom.appendChild(time);
 
-        li.appendChild(top);
-        li.appendChild(bottom);
+        socket.on(
+            'disconnect',
+            () => {
+                setStatus(
+                    'Disconnected from server.',
+                    'error'
+                );
+            }
+        );
 
-        if (selectedChat && selectedChat.id === chat.id) {
-          li.classList.add('bg-slate-100');
+
+        // =================================================
+        // SESSION
+        // =================================================
+
+        socket.on(
+            'session',
+            data => {
+                if (
+                    data &&
+                    data.token
+                ) {
+                    localStorage.setItem(
+                        'whatsapp_session_token',
+                        data.token
+                    );
+                }
+
+                if (
+                    data &&
+                    data.accountNumber
+                ) {
+                    connectedAccount.textContent =
+                        `CONNECTED AS ${data.accountNumber}`;
+                }
+            }
+        );
+
+
+        // =================================================
+        // GENERAL SERVER MESSAGE
+        // =================================================
+
+        socket.on(
+            'message',
+            message => {
+
+                const text =
+                    String(
+                        message || ''
+                    );
+
+                if (
+                    text
+                        .toLowerCase()
+                        .includes(
+                            'failed'
+                        ) ||
+                    text
+                        .toLowerCase()
+                        .includes(
+                            'error'
+                        )
+                ) {
+                    setStatus(
+                        text,
+                        'error'
+                    );
+                } else {
+                    setStatus(
+                        text
+                    );
+                }
+            }
+        );
+
+
+        // =================================================
+        // QR
+        // =================================================
+
+        socket.on(
+            'qr',
+            url => {
+                qrContainer.classList.remove(
+                    'hidden'
+                );
+
+                chatsContainer.classList.add(
+                    'hidden'
+                );
+
+                messagesContainer.classList.add(
+                    'hidden'
+                );
+
+                qrImage.src =
+                    url;
+
+                setStatus(
+                    'Scan the QR code to login.',
+                    'warning'
+                );
+            }
+        );
+
+
+        // =================================================
+        // READY
+        // =================================================
+
+        socket.on(
+            'ready',
+            data => {
+
+                qrContainer.classList.add(
+                    'hidden'
+                );
+
+                chatsContainer.classList.remove(
+                    'hidden'
+                );
+
+                messagesContainer.classList.remove(
+                    'hidden'
+                );
+
+                autoReplyPanel.classList.remove(
+                    'hidden'
+                );
+
+                if (
+                    data &&
+                    data.accountNumber
+                ) {
+                    connectedAccount.textContent =
+                        `CONNECTED AS ${data.accountNumber}`;
+                }
+
+                setStatus(
+                    'WhatsApp is connected.',
+                    'success'
+                );
+
+                socket.emit(
+                    'getAutoReply'
+                );
+
+                socket.emit(
+                    'getChats'
+                );
+            }
+        );
+
+
+        // =================================================
+        // RECENT CHATS
+        // =================================================
+
+        socket.on(
+            'chats',
+            chats => {
+
+                currentChats =
+                    Array.isArray(chats)
+                        ? chats
+                        : [];
+
+                chatCount.textContent =
+                    currentChats.length;
+
+                renderChats(
+                    currentChats
+                );
+
+                chatsContainer.classList.remove(
+                    'hidden'
+                );
+            }
+        );
+
+
+        function renderChats(
+            chats
+        ) {
+            chatsList.innerHTML = '';
+
+            if (
+                !chats.length
+            ) {
+                const empty =
+                    document.createElement(
+                        'li'
+                    );
+
+                empty.className =
+                    'p-6 text-center text-sm text-slate-400';
+
+                empty.textContent =
+                    'No chats found.';
+
+                chatsList.appendChild(
+                    empty
+                );
+
+                return;
+            }
+
+            chats.forEach(
+                chat => {
+
+                    const li =
+                        document.createElement(
+                            'li'
+                        );
+
+                    li.className =
+                        'cursor-pointer border-b border-slate-100 p-4 transition hover:bg-slate-50';
+
+                    if (
+                        chat.id ===
+                        currentChatId
+                    ) {
+                        li.classList.add(
+                            'bg-slate-100'
+                        );
+                    }
+
+
+                    const row =
+                        document.createElement(
+                            'div'
+                        );
+
+                    row.className =
+                        'flex items-center justify-between gap-3';
+
+
+                    const left =
+                        document.createElement(
+                            'div'
+                        );
+
+                    left.className =
+                        'min-w-0 flex-1';
+
+
+                    const name =
+                        document.createElement(
+                            'div'
+                        );
+
+                    name.className =
+                        'truncate font-semibold text-slate-700';
+
+                    name.textContent =
+                        chat.name ||
+                        'Unknown';
+
+
+                    const id =
+                        document.createElement(
+                            'div'
+                        );
+
+                    id.className =
+                        'mt-1 truncate text-xs text-slate-400';
+
+                    id.textContent =
+                        chat.id;
+
+
+                    left.appendChild(
+                        name
+                    );
+
+                    left.appendChild(
+                        id
+                    );
+
+
+                    row.appendChild(
+                        left
+                    );
+
+
+                    if (
+                        Number(
+                            chat.unread || 0
+                        ) > 0
+                    ) {
+
+                        const unread =
+                            document.createElement(
+                                'span'
+                            );
+
+                        unread.className =
+                            'flex h-6 min-w-6 items-center justify-center rounded-full bg-green-500 px-2 text-xs font-bold text-white';
+
+                        unread.textContent =
+                            String(
+                                chat.unread
+                            );
+
+                        row.appendChild(
+                            unread
+                        );
+                    }
+
+
+                    li.appendChild(
+                        row
+                    );
+
+
+                    li.addEventListener(
+                        'click',
+                        () => {
+                            openChat(
+                                chat
+                            );
+                        }
+                    );
+
+
+                    chatsList.appendChild(
+                        li
+                    );
+                }
+            );
         }
 
-        li.addEventListener('click', () => {
-          loadMessages(chat);
-        });
 
-        chatsList.appendChild(li);
-      });
-    }
+        // =================================================
+        // OPEN CHAT
+        // =================================================
 
-    function renderMessages(payload) {
-      if (!payload || !Array.isArray(payload.messages)) return;
+        function openChat(
+            chat
+        ) {
+            if (
+                !chat ||
+                !chat.id
+            ) {
+                return;
+            }
 
-      const messages = payload.messages;
-      messagesList.innerHTML = '';
+            currentChatId =
+                chat.id;
 
-      if (!messages.length) {
-        const empty = document.createElement('div');
-        empty.className =
-          'flex h-full min-h-32 items-center justify-center text-sm text-slate-400';
-        empty.textContent = 'No stored messages for this chat.';
-        messagesList.appendChild(empty);
-        return;
-      }
+            selectedChatName.textContent =
+                chat.name ||
+                'Unknown';
 
-      messages.forEach(message => {
-        const row = document.createElement('div');
-        row.className = `message-row ${message.fromMe ? 'me' : ''}`;
+            selectedChatId.textContent =
+                chat.id;
 
-        const bubble = document.createElement('div');
-        bubble.className = 'message-bubble';
+            messagesList.innerHTML = '';
 
-        if (!message.fromMe && message.senderName) {
-          const sender = document.createElement('div');
-          sender.className = 'mb-1 text-xs font-semibold text-slate-500';
-          sender.textContent = escapeText(message.senderName);
-          bubble.appendChild(sender);
+            const loading =
+                document.createElement(
+                    'div'
+                );
+
+            loading.className =
+                'py-10 text-center text-sm text-slate-400';
+
+            loading.textContent =
+                'Loading messages...';
+
+            messagesList.appendChild(
+                loading
+            );
+
+            renderChats(
+                currentChats
+            );
+
+            socket.emit(
+                'getMessages',
+                chat.id
+            );
         }
 
-        const body = document.createElement('div');
-        body.textContent =
-          escapeText(message.body) ||
-          `[${escapeText(message.type || 'message')}]`;
 
-        bubble.appendChild(body);
+        // =================================================
+        // MESSAGES
+        // =================================================
 
-        const meta = document.createElement('div');
-        meta.className = 'message-meta';
-        meta.textContent = formatTime(message.timestamp);
-        bubble.appendChild(meta);
+        socket.on(
+            'messages',
+            data => {
 
-        row.appendChild(bubble);
-        messagesList.appendChild(row);
-      });
+                if (
+                    !data ||
+                    !data.chatId
+                ) {
+                    return;
+                }
 
-      messagesList.scrollTop = messagesList.scrollHeight;
-    }
+                if (
+                    data.chatId !==
+                    currentChatId
+                ) {
+                    return;
+                }
 
-    function loadMessages(chat) {
-      selectedChat = chat;
+                renderMessages(
+                    data.messages || []
+                );
+            }
+        );
 
-      selectedChatName.textContent = escapeText(chat.name || 'Unknown');
-      selectedChatId.textContent = escapeText(chat.id);
 
-      renderChats(Array.from(chatsById.values()));
+        socket.on(
+            'messagesError',
+            error => {
 
-      messagesList.innerHTML = '';
-      const loading = document.createElement('div');
-      loading.className =
-        'flex h-full min-h-32 items-center justify-center text-sm text-slate-400';
-      loading.textContent = 'Loading messages...';
-      messagesList.appendChild(loading);
+                if (
+                    currentChatId
+                ) {
+                    messagesList.innerHTML = '';
 
-      socket.emit('getMessages', String(chat.id));
-    }
+                    const box =
+                        document.createElement(
+                            'div'
+                        );
 
-    socket.on('connect', () => {
-      setStatus('Connected to Server. Waiting for WhatsApp...', 'warning');
-    });
+                    box.className =
+                        'p-4 text-center text-sm text-red-500';
 
-    socket.on('disconnect', () => {
-      setStatus('Disconnected from Server.', 'error');
-    });
+                    box.textContent =
+                        String(
+                            error ||
+                            'Failed to load messages.'
+                        );
 
-    socket.on('session', session => {
-      if (session?.token) {
-        localStorage.setItem('wa_session_token', session.token);
-      }
+                    messagesList.appendChild(
+                        box
+                    );
+                }
+            }
+        );
 
-      if (session?.accountNumber) {
-        connectedAs.textContent = `CONNECTED AS ${session.accountNumber}`;
-      }
-    });
 
-    socket.on('message', msg => {
-      const text = String(msg || '');
-      const lower = text.toLowerCase();
+        function renderMessages(
+            messages
+        ) {
+            messagesList.innerHTML = '';
 
-      if (
-        lower.includes('failed') ||
-        lower.includes('error') ||
-        lower.includes('could not')
-      ) {
-        setStatus(text, 'error');
-      } else if (
-        lower.includes('successfully') ||
-        lower.includes('connected')
-      ) {
-        setStatus(text, 'success');
-      } else if (lower.includes('waiting') || lower.includes('scan')) {
-        setStatus(text, 'warning');
-      } else {
-        setStatus(text, 'info');
-      }
-    });
+            if (
+                !messages.length
+            ) {
+                const empty =
+                    document.createElement(
+                        'div'
+                    );
 
-    socket.on('qr', url => {
-      qrContainer.classList.remove('hidden');
-      appContainer.classList.add('hidden');
-      qrImage.src = url;
+                empty.className =
+                    'py-10 text-center text-sm text-slate-400';
 
-      connectedAs.textContent = 'CONNECTED AS —';
-      setStatus('Scan the QR Code to login.', 'warning');
-    });
+                empty.textContent =
+                    'No messages found.';
 
-    socket.on('ready', data => {
-      qrContainer.classList.add('hidden');
-      appContainer.classList.remove('hidden');
+                messagesList.appendChild(
+                    empty
+                );
 
-      const accountNumber =
-        data?.accountNumber ||
-        'Unknown';
+                return;
+            }
 
-      connectedAs.textContent = `CONNECTED AS ${accountNumber}`;
-      setStatus(
-        data?.text || `CONNECTED AS ${accountNumber}`,
-        'success'
-      );
+            messages.forEach(
+                message => {
 
-      socket.emit('getChats');
-    });
+                    const wrapper =
+                        document.createElement(
+                            'div'
+                        );
 
-    socket.on('chats', chats => {
-      qrContainer.classList.add('hidden');
-      appContainer.classList.remove('hidden');
-      renderChats(chats || []);
-    });
+                    wrapper.className =
+                        message.fromMe
+                            ? 'flex justify-end'
+                            : 'flex justify-start';
 
-    socket.on('messages', payload => {
-      if (
-        selectedChat &&
-        payload &&
-        String(payload.chatId) === String(selectedChat.id)
-      ) {
-        renderMessages(payload);
-      }
-    });
 
-    socket.on('messagesError', message => {
-      messagesList.innerHTML = '';
+                    const bubble =
+                        document.createElement(
+                            'div'
+                        );
 
-      const error = document.createElement('div');
-      error.className =
-        'flex h-full min-h-32 items-center justify-center text-sm text-red-500';
-      error.textContent = String(message || 'Failed to load messages.');
-      messagesList.appendChild(error);
-    });
+                    bubble.className =
+                        message.fromMe
+                            ? 'message-out max-w-[80%] rounded-xl px-3 py-2 shadow-sm'
+                            : 'message-in max-w-[80%] rounded-xl px-3 py-2 shadow-sm';
 
-    socket.on('newMessage', message => {
-      if (
-        selectedChat &&
-        message &&
-        String(message.chatId) === String(selectedChat.id)
-      ) {
-        socket.emit('getMessages', String(selectedChat.id));
-      }
-    });
 
-    socket.on('whatsappDisconnected', reason => {
-      setStatus(
-        `WhatsApp disconnected: ${reason || 'Unknown reason'}`,
-        'error'
-      );
-    });
+                    const body =
+                        document.createElement(
+                            'div'
+                        );
 
-    refreshChatsButton.addEventListener('click', () => {
-      refreshChatsButton.disabled = true;
-      socket.emit('getChats');
+                    body.className =
+                        'whitespace-pre-wrap break-words text-sm';
 
-      setTimeout(() => {
-        refreshChatsButton.disabled = false;
-      }, 1200);
-    });
-  </script>
+                    body.textContent =
+                        message.body ||
+                        `[${message.type || 'message'}]`;
+
+
+                    const time =
+                        document.createElement(
+                            'div'
+                        );
+
+                    time.className =
+                        'mt-1 text-right text-[10px] text-slate-400';
+
+                    time.textContent =
+                        formatTimestamp(
+                            message.timestamp
+                        );
+
+
+                    bubble.appendChild(
+                        body
+                    );
+
+                    bubble.appendChild(
+                        time
+                    );
+
+                    wrapper.appendChild(
+                        bubble
+                    );
+
+                    messagesList.appendChild(
+                        wrapper
+                    );
+                }
+            );
+
+            messagesList.scrollTop =
+                messagesList.scrollHeight;
+        }
+
+
+        function formatTimestamp(
+            timestamp
+        ) {
+            const number =
+                Number(
+                    timestamp || 0
+                );
+
+            if (
+                !number
+            ) {
+                return '';
+            }
+
+            const date =
+                new Date(
+                    number * 1000
+                );
+
+            return date.toLocaleString();
+        }
+
+
+        // =================================================
+        // NEW MESSAGE
+        // =================================================
+
+        socket.on(
+            'newMessage',
+            message => {
+
+                if (
+                    !message ||
+                    message.chatId !==
+                        currentChatId
+                ) {
+                    return;
+                }
+
+                socket.emit(
+                    'getMessages',
+                    currentChatId
+                );
+            }
+        );
+
+
+        // =================================================
+        // REFRESH CHATS
+        // =================================================
+
+        refreshChatsButton.addEventListener(
+            'click',
+            () => {
+
+                setStatus(
+                    'Refreshing chats...'
+                );
+
+                socket.emit(
+                    'getChats'
+                );
+            }
+        );
+
+
+        // =================================================
+        // AUTO REPLY SETTINGS
+        // =================================================
+
+        socket.on(
+            'autoReply',
+            settings => {
+
+                autoReplyPanel.classList.remove(
+                    'hidden'
+                );
+
+                autoReplyEnabled.checked =
+                    Boolean(
+                        settings?.enabled
+                    );
+
+                autoReplyTrigger.value =
+                    settings?.triggerText ||
+                    'START';
+
+                autoReplyText.value =
+                    settings?.replyText ||
+                    '';
+
+                updateAutoReplyStatus(
+                    settings
+                );
+
+                saveAutoReplyButton.disabled =
+                    false;
+            }
+        );
+
+
+        function updateAutoReplyStatus(
+            settings
+        ) {
+            if (
+                settings &&
+                settings.enabled
+            ) {
+                autoReplyStatus.textContent =
+                    `Active: ${settings.triggerText}`;
+
+                autoReplyStatus.className =
+                    'text-xs text-green-600';
+            } else {
+                autoReplyStatus.textContent =
+                    'Disabled';
+
+                autoReplyStatus.className =
+                    'text-xs text-slate-400';
+            }
+        }
+
+
+        socket.on(
+            'autoReplyError',
+            message => {
+
+                autoReplyStatus.textContent =
+                    String(
+                        message ||
+                        'Auto reply error.'
+                    );
+
+                autoReplyStatus.className =
+                    'text-xs text-red-500';
+
+                saveAutoReplyButton.disabled =
+                    false;
+            }
+        );
+
+
+        saveAutoReplyButton.addEventListener(
+            'click',
+            () => {
+
+                const triggerText =
+                    autoReplyTrigger.value.trim();
+
+                const replyText =
+                    autoReplyText.value.trim();
+
+                const enabled =
+                    autoReplyEnabled.checked;
+
+
+                if (
+                    !triggerText
+                ) {
+                    autoReplyStatus.textContent =
+                        'Enter a trigger.';
+
+                    autoReplyStatus.className =
+                        'text-xs text-red-500';
+
+                    return;
+                }
+
+
+                if (
+                    enabled &&
+                    !replyText
+                ) {
+                    autoReplyStatus.textContent =
+                        'Enter a response.';
+
+                    autoReplyStatus.className =
+                        'text-xs text-red-500';
+
+                    return;
+                }
+
+
+                saveAutoReplyButton.disabled =
+                    true;
+
+                autoReplyStatus.textContent =
+                    'Saving...';
+
+                autoReplyStatus.className =
+                    'text-xs text-slate-400';
+
+
+                socket.emit(
+                    'saveAutoReply',
+                    {
+                        enabled,
+
+                        triggerText,
+
+                        replyText
+                    }
+                );
+            }
+        );
+
+
+        // =================================================
+        // WHATSAPP DISCONNECTED
+        // =================================================
+
+        socket.on(
+            'whatsappDisconnected',
+            reason => {
+
+                setStatus(
+                    `WhatsApp disconnected: ${reason}`,
+                    'error'
+                );
+            }
+        );
+    </script>
+
 </body>
+
 </html>

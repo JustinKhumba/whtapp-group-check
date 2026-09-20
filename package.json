@@ -1,18 +1,19 @@
 {
   "name": "railway-whatsapp-test",
   "version": "1.0.0",
-  "description": "WhatsApp Web integration test for Railway",
+  "description": "WhatsApp Web integration with persistent chats, messages and auto reply",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.2",
-    "mysql2": "^3.11.0",
+    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main",
     "puppeteer": "^22.7.1",
-    "qrcode": "^1.5.3",
     "socket.io": "^4.7.5",
-    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main"
+    "qrcode": "^1.5.3",
+    "mysql2": "^3.11.0",
+    "adm-zip": "^0.5.15"
   },
   "engines": {
     "node": ">=18.0.0"

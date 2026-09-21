@@ -265,11 +265,18 @@ async function initDatabase() {
         `);
 
         /*
-         * Allowed source IP addresses.
+         * API whitelist entries.
+         *
+         * One row represents one exact relationship:
+         *     domain_name <-> ip_address
+         *
+         * The public API requires BOTH values to match the same
+         * enabled row. One domain may have multiple API server IPs.
          */
         await db.query(`
-            CREATE TABLE IF NOT EXISTS api_ip_whitelist (
+            CREATE TABLE IF NOT EXISTS api_whitelist (
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                domain_name VARCHAR(253) NOT NULL,
                 ip_address VARCHAR(45) NOT NULL,
                 label VARCHAR(100) DEFAULT NULL,
                 enabled TINYINT(1) NOT NULL DEFAULT 1,
@@ -278,30 +285,9 @@ async function initDatabase() {
                     ON UPDATE CURRENT_TIMESTAMP,
 
                 PRIMARY KEY (id),
-                UNIQUE KEY unique_ip_address (ip_address),
-                INDEX idx_whitelist_enabled (enabled)
-            )
-            ENGINE=InnoDB
-            DEFAULT CHARSET=utf8mb4
-            COLLATE=utf8mb4_unicode_ci
-        `);
-
-        /*
-         * Allowed website domains.
-         */
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS api_domain_whitelist (
-                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-                domain_name VARCHAR(253) NOT NULL,
-                label VARCHAR(100) DEFAULT NULL,
-                enabled TINYINT(1) NOT NULL DEFAULT 1,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    ON UPDATE CURRENT_TIMESTAMP,
-
-                PRIMARY KEY (id),
-                UNIQUE KEY unique_domain_name (domain_name),
-                INDEX idx_domain_enabled (enabled)
+                UNIQUE KEY unique_domain_ip (domain_name, ip_address),
+                INDEX idx_whitelist_enabled (enabled),
+                INDEX idx_whitelist_domain_ip (domain_name, ip_address)
             )
             ENGINE=InnoDB
             DEFAULT CHARSET=utf8mb4
@@ -474,49 +460,30 @@ function getClientIp(req) {
 // WHITELIST DB
 // =====================================================
 
-async function isWhitelistedIp(ip) {
+async function isWhitelistedPair(ip, domain) {
     const pool =
         await requireDatabase();
 
-    const normalized =
+    const normalizedIp =
         normalizeIpAddress(ip);
 
+    const normalizedDomain =
+        normalizeDomain(domain);
+
     const [rows] =
         await pool.execute(
             `
             SELECT id
-            FROM api_ip_whitelist
+            FROM api_whitelist
             WHERE ip_address = ?
+              AND domain_name = ?
               AND enabled = 1
             LIMIT 1
             `,
-            [normalized]
-        );
-
-    return rows.length > 0;
-}
-
-async function isWhitelistedDomain(
-    domain
-) {
-    const pool =
-        await requireDatabase();
-
-    const normalized =
-        normalizeDomain(
-            domain
-        );
-
-    const [rows] =
-        await pool.execute(
-            `
-            SELECT id
-            FROM api_domain_whitelist
-            WHERE domain_name = ?
-              AND enabled = 1
-            LIMIT 1
-            `,
-            [normalized]
+            [
+                normalizedIp,
+                normalizedDomain
+            ]
         );
 
     return rows.length > 0;
@@ -526,64 +493,31 @@ async function listWhitelist() {
     const pool =
         await requireDatabase();
 
-    const [ips] =
+    const [rows] =
         await pool.execute(`
             SELECT
                 id,
+                domain_name AS domain,
                 ip_address AS ip,
                 label,
                 enabled,
                 created_at,
                 updated_at
-            FROM api_ip_whitelist
-            ORDER BY id ASC
-        `);
-
-    const [domains] =
-        await pool.execute(`
-            SELECT
-                id,
-                domain_name AS domain,
-                label,
-                enabled,
-                created_at,
-                updated_at
-            FROM api_domain_whitelist
+            FROM api_whitelist
             ORDER BY id ASC
         `);
 
     return {
-        ips: ips.map(
-            row => ({
-                id: Number(
-                    row.id
-                ),
-                ip: String(
-                    row.ip
-                ),
-                label:
-                    row.label == null
-                        ? ''
-                        : String(
-                              row.label
-                          ),
-                enabled: Boolean(
-                    row.enabled
-                ),
-                createdAt:
-                    row.created_at,
-                updatedAt:
-                    row.updated_at
-            })
-        ),
-
-        domains: domains.map(
+        entries: rows.map(
             row => ({
                 id: Number(
                     row.id
                 ),
                 domain: String(
                     row.domain
+                ),
+                ip: String(
+                    row.ip
                 ),
                 label:
                     row.label == null
@@ -603,72 +537,18 @@ async function listWhitelist() {
     };
 }
 
-async function addWhitelistIp(
+async function addWhitelistEntry(
     ip,
-    label = ''
-) {
-    const pool =
-        await requireDatabase();
-
-    const normalized =
-        normalizeIpAddress(ip);
-
-    const cleanLabel =
-        sanitizeLabel(label);
-
-    await pool.execute(
-        `
-        INSERT INTO api_ip_whitelist (
-            ip_address,
-            label,
-            enabled
-        )
-        VALUES (?, ?, 1)
-        ON DUPLICATE KEY UPDATE
-            label = VALUES(label),
-            enabled = 1,
-            updated_at = CURRENT_TIMESTAMP
-        `,
-        [
-            normalized,
-            cleanLabel || null
-        ]
-    );
-
-    return normalized;
-}
-
-async function removeWhitelistIp(
-    ip
-) {
-    const pool =
-        await requireDatabase();
-
-    const normalized =
-        normalizeIpAddress(ip);
-
-    const [result] =
-        await pool.execute(
-            `
-            DELETE FROM api_ip_whitelist
-            WHERE ip_address = ?
-            `,
-            [normalized]
-        );
-
-    return Number(
-        result.affectedRows || 0
-    );
-}
-
-async function addWhitelistDomain(
     domain,
     label = ''
 ) {
     const pool =
         await requireDatabase();
 
-    const normalized =
+    const normalizedIp =
+        normalizeIpAddress(ip);
+
+    const normalizedDomain =
         normalizeDomain(domain);
 
     const cleanLabel =
@@ -676,42 +556,56 @@ async function addWhitelistDomain(
 
     await pool.execute(
         `
-        INSERT INTO api_domain_whitelist (
+        INSERT INTO api_whitelist (
             domain_name,
+            ip_address,
             label,
             enabled
         )
-        VALUES (?, ?, 1)
+        VALUES (?, ?, ?, 1)
         ON DUPLICATE KEY UPDATE
             label = VALUES(label),
             enabled = 1,
             updated_at = CURRENT_TIMESTAMP
         `,
         [
-            normalized,
+            normalizedDomain,
+            normalizedIp,
             cleanLabel || null
         ]
     );
 
-    return normalized;
+    return {
+        ip: normalizedIp,
+        domain: normalizedDomain
+    };
 }
 
-async function removeWhitelistDomain(
-    domain
-) {
+async function removeWhitelistEntry(id) {
     const pool =
         await requireDatabase();
 
-    const normalized =
-        normalizeDomain(domain);
+    const numericId =
+        Number(id);
+
+    if (
+        !Number.isSafeInteger(numericId) ||
+        numericId < 1
+    ) {
+        throw new Error(
+            'Invalid whitelist entry ID.'
+        );
+    }
 
     const [result] =
         await pool.execute(
             `
-            DELETE FROM api_domain_whitelist
-            WHERE domain_name = ?
+            DELETE FROM api_whitelist
+            WHERE id = ?
             `,
-            [normalized]
+            [
+                numericId
+            ]
         );
 
     return Number(
@@ -1382,6 +1276,7 @@ function validateAdminPayload(
             'timestamp',
             'nonce',
             'action',
+            'id',
             'ip',
             'domain',
             'label'
@@ -1417,10 +1312,8 @@ function validateAdminPayload(
         new Set([
             'list',
             'current-ip',
-            'add-ip',
-            'remove-ip',
-            'add-domain',
-            'remove-domain'
+            'add-entry',
+            'remove-entry'
         ]);
 
     if (
@@ -1435,6 +1328,25 @@ function validateAdminPayload(
 
     return {
         action,
+
+        id:
+            payload.id == null
+                ? null
+                : (() => {
+                      const numericId =
+                          Number(payload.id);
+
+                      if (
+                          !Number.isSafeInteger(numericId) ||
+                          numericId < 1
+                      ) {
+                          throw new Error(
+                              'Invalid whitelist entry ID.'
+                          );
+                      }
+
+                      return numericId;
+                  })(),
 
         ip:
             payload.ip == null
@@ -2086,36 +1998,11 @@ async function requireEncryptedMembershipRequest(
         getClientIp(req);
 
     /*
-     * 1. SOURCE IP WHITELIST
+     * 1. The source IP is checked together with the encrypted domain.
+     *    The pair must exist on the same enabled whitelist row.
+     *
+     *    The domain is encrypted, so this check happens after decryption.
      */
-    try {
-        if (
-            !(await isWhitelistedIp(
-                sourceIp
-            ))
-        ) {
-            return res
-                .status(403)
-                .json({
-                    success: false,
-                    error:
-                        'Request IP is not whitelisted.'
-                });
-        }
-    } catch (error) {
-        console.error(
-            'IP whitelist check failed:',
-            error.message
-        );
-
-        return res
-            .status(503)
-            .json({
-                success: false,
-                error:
-                    'Whitelist service unavailable.'
-            });
-    }
 
     /*
      * 2. RATE LIMIT BY ACTUAL SOURCE IP
@@ -2203,10 +2090,13 @@ async function requireEncryptedMembershipRequest(
             );
 
         /*
-         * 6. DOMAIN WHITELIST
+         * 6. SOURCE IP + DOMAIN WHITELIST
+         *
+         * Both values must match the SAME whitelist row.
          */
         if (
-            !(await isWhitelistedDomain(
+            !(await isWhitelistedPair(
+                sourceIp,
                 data.domain
             ))
         ) {
@@ -2215,7 +2105,7 @@ async function requireEncryptedMembershipRequest(
                 .json({
                     success: false,
                     error:
-                        'Request domain is not whitelisted.'
+                        'Request IP and domain are not whitelisted as a pair.'
                 });
         }
 
@@ -2523,62 +2413,10 @@ app.post(
                                 )
                         });
 
-                case 'add-ip':
+                case 'add-entry':
 
                     if (
-                        !payload.ip
-                    ) {
-                        return res
-                            .status(400)
-                            .json({
-                                success: false,
-                                error:
-                                    'IP is required.'
-                            });
-                    }
-
-                    await addWhitelistIp(
-                        payload.ip,
-                        payload.label
-                    );
-
-                    return res
-                        .status(200)
-                        .json({
-                            success: true,
-                            whitelist:
-                                await listWhitelist()
-                        });
-
-                case 'remove-ip':
-
-                    if (
-                        !payload.ip
-                    ) {
-                        return res
-                            .status(400)
-                            .json({
-                                success: false,
-                                error:
-                                    'IP is required.'
-                            });
-                    }
-
-                    await removeWhitelistIp(
-                        payload.ip
-                    );
-
-                    return res
-                        .status(200)
-                        .json({
-                            success: true,
-                            whitelist:
-                                await listWhitelist()
-                        });
-
-                case 'add-domain':
-
-                    if (
+                        !payload.ip ||
                         !payload.domain
                     ) {
                         return res
@@ -2586,11 +2424,12 @@ app.post(
                             .json({
                                 success: false,
                                 error:
-                                    'Domain is required.'
+                                    'Both domain and IP are required.'
                             });
                     }
 
-                    await addWhitelistDomain(
+                    await addWhitelistEntry(
+                        payload.ip,
                         payload.domain,
                         payload.label
                     );
@@ -2603,22 +2442,22 @@ app.post(
                                 await listWhitelist()
                         });
 
-                case 'remove-domain':
+                case 'remove-entry':
 
                     if (
-                        !payload.domain
+                        !payload.id
                     ) {
                         return res
                             .status(400)
                             .json({
                                 success: false,
                                 error:
-                                    'Domain is required.'
+                                    'Whitelist entry ID is required.'
                             });
                     }
 
-                    await removeWhitelistDomain(
-                        payload.domain
+                    await removeWhitelistEntry(
+                        payload.id
                     );
 
                     return res

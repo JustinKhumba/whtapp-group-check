@@ -1,7 +1,7 @@
 {
   "name": "railway-whatsapp-group-tools",
   "version": "1.0.0",
-  "description": "WhatsApp group-only tools with a POST membership-check API",
+  "description": "WhatsApp group-only tools with encrypted POST membership API and IP/domain whitelist",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

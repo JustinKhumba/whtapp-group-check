@@ -1,3 +1,5 @@
+<!-- FILE: index.html -->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,7 +13,6 @@
     <title>WhatsApp Group Manager</title>
 
     <script src="https://cdn.tailwindcss.com"></script>
-
     <script src="/socket.io/socket.io.js"></script>
 
     <style>
@@ -58,6 +59,7 @@
         >
 
             <div>
+
                 <h1 class="text-xl font-bold">
                     WhatsApp Group Manager
                 </h1>
@@ -68,6 +70,7 @@
                 >
                     WhatsApp
                 </p>
+
             </div>
 
             <button
@@ -116,15 +119,11 @@
                 Connect WhatsApp
             </h2>
 
-            <p
-                class="mt-2 text-center text-sm text-slate-500"
-            >
+            <p class="mt-2 text-center text-sm text-slate-500">
                 Open WhatsApp on your phone and scan this QR code.
             </p>
 
-            <p
-                class="mt-1 text-center text-xs text-slate-400"
-            >
+            <p class="mt-1 text-center text-xs text-slate-400">
                 Settings → Linked Devices → Link a Device
             </p>
 
@@ -133,12 +132,14 @@
                 <div
                     class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
                 >
+
                     <img
                         id="qr-image"
                         src=""
                         alt="WhatsApp QR Code"
                         class="h-64 w-64 rounded-xl"
                     >
+
                 </div>
 
             </div>
@@ -158,9 +159,9 @@
 
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
 
-            <!-- ========================================= -->
+            <!-- ================================================= -->
             <!-- GROUP LIST -->
-            <!-- ========================================= -->
+            <!-- ================================================= -->
 
             <section
                 class="rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-2"
@@ -172,15 +173,11 @@
 
                     <div>
 
-                        <h2
-                            class="font-semibold text-slate-800"
-                        >
+                        <h2 class="font-semibold text-slate-800">
                             WhatsApp Groups
                         </h2>
 
-                        <p
-                            class="mt-1 text-xs text-slate-400"
-                        >
+                        <p class="mt-1 text-xs text-slate-400">
                             Only group names and group IDs are shown.
                         </p>
 
@@ -216,9 +213,9 @@
 
             </section>
 
-            <!-- ========================================= -->
+            <!-- ================================================= -->
             <!-- MEMBERSHIP CHECKER -->
-            <!-- ========================================= -->
+            <!-- ================================================= -->
 
             <section
                 class="h-fit rounded-2xl border border-slate-200 bg-white shadow-sm"
@@ -228,15 +225,11 @@
                     class="border-b border-slate-100 px-5 py-4"
                 >
 
-                    <h2
-                        class="font-semibold text-slate-800"
-                    >
+                    <h2 class="font-semibold text-slate-800">
                         Group Membership Checker
                     </h2>
 
-                    <p
-                        class="mt-1 text-xs text-slate-400"
-                    >
+                    <p class="mt-1 text-xs text-slate-400">
                         Check whether a phone number belongs to a group.
                     </p>
 
@@ -265,9 +258,7 @@
                             class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-sm outline-none transition focus:border-slate-400 focus:bg-white"
                         >
 
-                        <p
-                            class="mt-1 text-xs text-slate-400"
-                        >
+                        <p class="mt-1 text-xs text-slate-400">
                             Must end with <code>@g.us</code>
                         </p>
 
@@ -295,9 +286,7 @@
                             class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400 focus:bg-white"
                         >
 
-                        <p
-                            class="mt-1 text-xs text-slate-400"
-                        >
+                        <p class="mt-1 text-xs text-slate-400">
                             Enter local number only. Do not use +91.
                         </p>
 
@@ -321,7 +310,7 @@
                         class="hidden rounded-xl border p-4 text-sm"
                     ></div>
 
-                    <!-- CACHE INFO -->
+                    <!-- CACHE -->
 
                     <div
                         id="cache-info"
@@ -334,9 +323,9 @@
 
         </div>
 
-        <!-- ============================================= -->
-        <!-- API INFORMATION -->
-        <!-- ============================================= -->
+        <!-- ================================================= -->
+        <!-- API WHITELIST -->
+        <!-- ================================================= -->
 
         <section
             class="mt-6 rounded-2xl border border-slate-200 bg-white shadow-sm"
@@ -344,21 +333,209 @@
 
             <div class="border-b border-slate-100 px-5 py-4">
 
-                <h2
-                    class="font-semibold text-slate-800"
-                >
-                    External API
+                <h2 class="font-semibold text-slate-800">
+                    API Whitelist
                 </h2>
 
-                <p
-                    class="mt-1 text-xs text-slate-400"
-                >
-                    External websites should call the encrypted POST API.
+                <p class="mt-1 text-xs text-slate-400">
+                    Add the backend IP addresses and exact domain names allowed to use the encrypted API.
                 </p>
 
             </div>
 
-            <div class="space-y-4 p-5">
+            <div class="grid grid-cols-1 gap-6 p-5 lg:grid-cols-2">
+
+                <!-- IP -->
+
+                <div class="rounded-xl border border-slate-200 p-4">
+
+                    <div class="flex items-start justify-between gap-3">
+
+                        <div>
+
+                            <h3 class="font-semibold text-slate-700">
+                                Allowed IP Addresses
+                            </h3>
+
+                            <p class="mt-1 text-xs leading-5 text-slate-400">
+                                Add the public IP of the backend server that actually sends the API request.
+                            </p>
+
+                        </div>
+
+                        <button
+                            id="get-current-ip"
+                            type="button"
+                            class="shrink-0 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200"
+                        >
+                            Browser IP
+                        </button>
+
+                    </div>
+
+                    <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+                        <input
+                            id="whitelist-ip"
+                            type="text"
+                            autocomplete="off"
+                            spellcheck="false"
+                            maxlength="45"
+                            placeholder="203.0.113.10"
+                            class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-sm outline-none transition focus:border-slate-400 focus:bg-white"
+                        >
+
+                        <input
+                            id="whitelist-ip-label"
+                            type="text"
+                            autocomplete="off"
+                            maxlength="100"
+                            placeholder="My API server"
+                            class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400 focus:bg-white"
+                        >
+
+                    </div>
+
+                    <button
+                        id="add-whitelist-ip"
+                        type="button"
+                        class="mt-3 w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700"
+                    >
+                        Add IP
+                    </button>
+
+                    <div
+                        id="ip-whitelist-list"
+                        class="mt-4 space-y-2"
+                    ></div>
+
+                </div>
+
+                <!-- DOMAIN -->
+
+                <div class="rounded-xl border border-slate-200 p-4">
+
+                    <div>
+
+                        <h3 class="font-semibold text-slate-700">
+                            Allowed Domain Names
+                        </h3>
+
+                        <p class="mt-1 text-xs leading-5 text-slate-400">
+                            Exact hostname only. Example: example.com or api.example.com
+                        </p>
+
+                    </div>
+
+                    <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+                        <input
+                            id="whitelist-domain"
+                            type="text"
+                            autocomplete="off"
+                            spellcheck="false"
+                            maxlength="253"
+                            placeholder="example.com"
+                            class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-sm outline-none transition focus:border-slate-400 focus:bg-white"
+                        >
+
+                        <input
+                            id="whitelist-domain-label"
+                            type="text"
+                            autocomplete="off"
+                            maxlength="100"
+                            placeholder="Main website"
+                            class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400 focus:bg-white"
+                        >
+
+                    </div>
+
+                    <button
+                        id="add-whitelist-domain"
+                        type="button"
+                        class="mt-3 w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700"
+                    >
+                        Add Domain
+                    </button>
+
+                    <div
+                        id="domain-whitelist-list"
+                        class="mt-4 space-y-2"
+                    ></div>
+
+                </div>
+
+                <!-- ADMIN KEY -->
+
+                <div
+                    class="rounded-xl border border-yellow-200 bg-yellow-50 p-4 lg:col-span-2"
+                >
+
+                    <label
+                        for="whitelist-admin-key"
+                        class="block text-sm font-semibold text-yellow-900"
+                    >
+                        WHITELIST_ADMIN_KEY
+                    </label>
+
+                    <p class="mt-1 text-xs leading-5 text-yellow-800">
+                        Enter the admin key only when managing the whitelist.
+                        The key is not stored in localStorage or sent as a normal header.
+                    </p>
+
+                    <div class="mt-3 flex flex-col gap-3 sm:flex-row">
+
+                        <input
+                            id="whitelist-admin-key"
+                            type="password"
+                            autocomplete="off"
+                            spellcheck="false"
+                            placeholder="32+ character admin key"
+                            class="min-w-0 flex-1 rounded-lg border border-yellow-300 bg-white px-3 py-2.5 font-mono text-sm outline-none transition focus:border-yellow-500"
+                        >
+
+                        <button
+                            id="load-whitelist"
+                            type="button"
+                            class="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700"
+                        >
+                            Load Whitelist
+                        </button>
+
+                    </div>
+
+                    <div
+                        id="whitelist-status"
+                        class="mt-3 hidden rounded-lg p-3 text-sm"
+                    ></div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+        <!-- ================================================= -->
+        <!-- API INFORMATION -->
+        <!-- ================================================= -->
+
+        <section
+            class="mt-6 rounded-2xl border border-slate-200 bg-white shadow-sm"
+        >
+
+            <div class="border-b border-slate-100 px-5 py-4">
+
+                <h2 class="font-semibold text-slate-800">
+                    External API
+                </h2>
+
+                <p class="mt-1 text-xs text-slate-400">
+                    External websites must call the encrypted API from a whitelisted backend IP.
+                </p>
+
+            </div>
+
+            <div class="space-y-5 p-5">
 
                 <div>
 
@@ -404,13 +581,67 @@
 
                 </div>
 
-                <p
-                    class="text-xs leading-5 text-slate-500"
+                <div>
+
+                    <div
+                        class="text-xs font-semibold uppercase tracking-wider text-slate-400"
+                    >
+                        Decrypted payload fields
+                    </div>
+
+                    <pre
+                        class="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs leading-6 text-white"
+                    >{
+  "version": 1,
+  "timestamp": 1750000000000,
+  "nonce": "RANDOM_BASE64URL_NONCE",
+  "phoneNumber": "9876543210",
+  "groupId": "120363428682544694@g.us",
+  "clientIp": "203.0.113.25",
+  "domain": "example.com"
+}</pre>
+
+                </div>
+
+                <div
+                    class="rounded-xl border border-slate-200 bg-slate-50 p-4"
                 >
-                    The encryption secret must stay on your website's backend.
-                    Do not put <code>API_ENCRYPTION_SECRET</code> inside this
-                    HTML or any browser JavaScript.
-                </p>
+
+                    <div
+                        class="text-xs font-semibold uppercase tracking-wider text-slate-400"
+                    >
+                        Important
+                    </div>
+
+                    <div class="mt-2 text-sm leading-6 text-slate-600">
+
+                        <p>
+                            The normal API uses
+                            <code>API_ENCRYPTION_SECRET</code>.
+                        </p>
+
+                        <p class="mt-2">
+                            Keep that secret only on the external website backend.
+                        </p>
+
+                        <p class="mt-2">
+                            The request body contains only the encrypted
+                            <code>payload</code>.
+                        </p>
+
+                        <p class="mt-2">
+                            The actual HTTP source IP of the backend must be whitelisted.
+                        </p>
+
+                        <p class="mt-2">
+                            The encrypted
+                            <code>domain</code>
+                            must also be whitelisted.
+                        </p>
+
+                    </div>
+
+                </div>
 
             </div>
 
@@ -506,13 +737,78 @@
             );
 
         // =================================================
+        // WHITELIST DOM
+        // =================================================
+
+        const whitelistAdminKeyInput =
+            document.getElementById(
+                'whitelist-admin-key'
+            );
+
+        const loadWhitelistButton =
+            document.getElementById(
+                'load-whitelist'
+            );
+
+        const getCurrentIpButton =
+            document.getElementById(
+                'get-current-ip'
+            );
+
+        const whitelistIpInput =
+            document.getElementById(
+                'whitelist-ip'
+            );
+
+        const whitelistIpLabelInput =
+            document.getElementById(
+                'whitelist-ip-label'
+            );
+
+        const addWhitelistIpButton =
+            document.getElementById(
+                'add-whitelist-ip'
+            );
+
+        const whitelistDomainInput =
+            document.getElementById(
+                'whitelist-domain'
+            );
+
+        const whitelistDomainLabelInput =
+            document.getElementById(
+                'whitelist-domain-label'
+            );
+
+        const addWhitelistDomainButton =
+            document.getElementById(
+                'add-whitelist-domain'
+            );
+
+        const ipWhitelistList =
+            document.getElementById(
+                'ip-whitelist-list'
+            );
+
+        const domainWhitelistList =
+            document.getElementById(
+                'domain-whitelist-list'
+            );
+
+        const whitelistStatus =
+            document.getElementById(
+                'whitelist-status'
+            );
+
+        // =================================================
         // STATE
         // =================================================
 
         let whatsappConnected =
             false;
 
-        let groups = [];
+        let groups =
+            [];
 
         let checkingMembership =
             false;
@@ -527,7 +823,9 @@
         ) {
 
             statusMessage.textContent =
-                String(message || '');
+                String(
+                    message || ''
+                );
 
             if (
                 type === 'success'
@@ -554,7 +852,53 @@
 
                 statusMessage.className =
                     'mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-medium text-blue-700 shadow-sm';
+
             }
+
+        }
+
+        function setWhitelistStatus(
+            message,
+            type = 'info'
+        ) {
+
+            whitelistStatus.classList.remove(
+                'hidden'
+            );
+
+            whitelistStatus.textContent =
+                String(
+                    message || ''
+                );
+
+            if (
+                type === 'success'
+            ) {
+
+                whitelistStatus.className =
+                    'mt-3 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800';
+
+            } else if (
+                type === 'error'
+            ) {
+
+                whitelistStatus.className =
+                    'mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800';
+
+            } else if (
+                type === 'warning'
+            ) {
+
+                whitelistStatus.className =
+                    'mt-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800';
+
+            } else {
+
+                whitelistStatus.className =
+                    'mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800';
+
+            }
+
         }
 
         // =================================================
@@ -576,10 +920,11 @@
                 );
 
             return div.innerHTML;
+
         }
 
         // =================================================
-        // CONNECTION
+        // SOCKET CONNECTION
         // =================================================
 
         socket.on(
@@ -692,6 +1037,7 @@
 
                     connectionAccount.textContent =
                         'WHATSAPP CONNECTED';
+
                 }
 
                 setStatus(
@@ -705,7 +1051,7 @@
         );
 
         // =================================================
-        // STATUS FROM SERVER
+        // SERVER STATUS
         // =================================================
 
         socket.on(
@@ -722,6 +1068,7 @@
                     );
 
                     return;
+
                 }
 
                 const type =
@@ -740,13 +1087,14 @@
                         message,
                         type
                     );
+
                 }
 
             }
         );
 
         // =================================================
-        // GROUP LIST
+        // GROUPS
         // =================================================
 
         function loadGroups() {
@@ -754,7 +1102,9 @@
             if (
                 !whatsappConnected
             ) {
+
                 return;
+
             }
 
             groupsLoading.classList.remove(
@@ -867,6 +1217,7 @@
                     'No WhatsApp groups found.';
 
                 return;
+
             }
 
             groupsEmpty.classList.add(
@@ -1012,8 +1363,10 @@
 
                                 setTimeout(
                                     () => {
+
                                         copyButton.textContent =
                                             'Copy';
+
                                     },
                                     1200
                                 );
@@ -1074,15 +1427,11 @@
 
         refreshGroupsButton.addEventListener(
             'click',
-            () => {
-
-                loadGroups();
-
-            }
+            loadGroups
         );
 
         // =================================================
-        // VALIDATION
+        // MEMBERSHIP VALIDATION
         // =================================================
 
         function isValidGroupId(
@@ -1144,6 +1493,7 @@
                 groupIdInput.focus();
 
                 return null;
+
             }
 
             if (
@@ -1160,6 +1510,7 @@
                 groupIdInput.focus();
 
                 return null;
+
             }
 
             if (
@@ -1174,6 +1525,7 @@
                 phoneInput.focus();
 
                 return null;
+
             }
 
             if (
@@ -1188,6 +1540,7 @@
                 phoneInput.focus();
 
                 return null;
+
             }
 
             return {
@@ -1199,7 +1552,7 @@
         }
 
         // =================================================
-        // RESULT UI
+        // MEMBERSHIP RESULT UI
         // =================================================
 
         function showMembershipResult(
@@ -1268,7 +1621,9 @@
             if (
                 checkingMembership
             ) {
+
                 return;
+
             }
 
             if (
@@ -1281,6 +1636,7 @@
                 );
 
                 return;
+
             }
 
             const values =
@@ -1289,7 +1645,9 @@
             if (
                 !values
             ) {
+
                 return;
+
             }
 
             checkingMembership =
@@ -1316,7 +1674,7 @@
         );
 
         // =================================================
-        // MEMBERSHIP RESULT
+        // MEMBERSHIP SUCCESS
         // =================================================
 
         socket.on(
@@ -1454,34 +1812,780 @@
         // ENTER KEY
         // =================================================
 
-        groupIdInput.addEventListener(
-            'keydown',
-            event => {
+        function bindEnter(
+            input
+        ) {
 
-                if (
-                    event.key ===
-                    'Enter' &&
-                    !checkButton.disabled
+            input.addEventListener(
+                'keydown',
+                event => {
+
+                    if (
+                        event.key ===
+                        'Enter' &&
+                        !checkButton.disabled
+                    ) {
+
+                        checkMembership();
+
+                    }
+
+                }
+            );
+
+        }
+
+        bindEnter(
+            groupIdInput
+        );
+
+        bindEnter(
+            phoneInput
+        );
+
+        // =================================================
+        // ADMIN CRYPTO HELPERS
+        // =================================================
+
+        function adminRandomBytes(
+            length
+        ) {
+
+            const bytes =
+                new Uint8Array(
+                    length
+                );
+
+            crypto.getRandomValues(
+                bytes
+            );
+
+            return bytes;
+
+        }
+
+        function bytesToBase64Url(
+            bytes
+        ) {
+
+            let binary =
+                '';
+
+            const chunkSize =
+                0x8000;
+
+            for (
+                let i = 0;
+                i < bytes.length;
+                i += chunkSize
+            ) {
+
+                binary +=
+                    String.fromCharCode(
+                        ...bytes.subarray(
+                            i,
+                            Math.min(
+                                i + chunkSize,
+                                bytes.length
+                            )
+                        )
+                    );
+
+            }
+
+            return btoa(
+                binary
+            )
+                .replace(
+                    /\+/g,
+                    '-'
+                )
+                .replace(
+                    /\//g,
+                    '_'
+                )
+                .replace(
+                    /=+$/g,
+                    ''
+                );
+
+        }
+
+        async function createAdminEncryptedPayload(
+            payload
+        ) {
+
+            const secret =
+                String(
+                    whitelistAdminKeyInput.value ||
+                    ''
+                );
+
+            if (
+                secret.length < 32
+            ) {
+
+                throw new Error(
+                    'Enter a valid WHITELIST_ADMIN_KEY with at least 32 characters.'
+                );
+
+            }
+
+            const secretBytes =
+                new TextEncoder().encode(
+                    secret
+                );
+
+            const secretHash =
+                await crypto.subtle.digest(
+                    'SHA-256',
+                    secretBytes
+                );
+
+            const key =
+                await crypto.subtle.importKey(
+                    'raw',
+                    secretHash,
+                    {
+                        name:
+                            'AES-GCM'
+                    },
+                    false,
+                    [
+                        'encrypt'
+                    ]
+                );
+
+            const iv =
+                adminRandomBytes(
+                    12
+                );
+
+            const timestamp =
+                Date.now();
+
+            const nonce =
+                bytesToBase64Url(
+                    adminRandomBytes(
+                        16
+                    )
+                );
+
+            const fullPayload =
+                {
+                    version: 1,
+                    timestamp,
+                    nonce,
+                    ...payload
+                };
+
+            const plaintext =
+                new TextEncoder().encode(
+                    JSON.stringify(
+                        fullPayload
+                    )
+                );
+
+            const encrypted =
+                new Uint8Array(
+                    await crypto.subtle.encrypt(
+                        {
+                            name:
+                                'AES-GCM',
+                            iv,
+                            tagLength:
+                                128
+                        },
+                        key,
+                        plaintext
+                    )
+                );
+
+            const authTag =
+                encrypted.slice(
+                    encrypted.length - 16
+                );
+
+            const ciphertext =
+                encrypted.slice(
+                    0,
+                    encrypted.length - 16
+                );
+
+            return [
+                'v1',
+                bytesToBase64Url(
+                    iv
+                ),
+                bytesToBase64Url(
+                    authTag
+                ),
+                bytesToBase64Url(
+                    ciphertext
+                )
+            ].join('.');
+
+        }
+
+        // =================================================
+        // ADMIN API REQUEST
+        // =================================================
+
+        async function adminRequest(
+            action,
+            extra = {}
+        ) {
+
+            const encryptedPayload =
+                await createAdminEncryptedPayload(
+                    {
+                        action,
+                        ...extra
+                    }
+                );
+
+            const response =
+                await fetch(
+                    '/api/admin/whitelist',
+                    {
+                        method:
+                            'POST',
+
+                        headers: {
+                            'Content-Type':
+                                'application/json'
+                        },
+
+                        body:
+                            JSON.stringify(
+                                {
+                                    payload:
+                                        encryptedPayload
+                                }
+                            )
+                    }
+                );
+
+            let data;
+
+            try {
+
+                data =
+                    await response.json();
+
+            } catch (_) {
+
+                throw new Error(
+                    `Server returned HTTP ${response.status}.`
+                );
+
+            }
+
+            if (
+                !response.ok ||
+                !data?.success
+            ) {
+
+                throw new Error(
+                    String(
+                        data?.error ||
+                        `Server returned HTTP ${response.status}.`
+                    )
+                );
+
+            }
+
+            return data;
+
+        }
+
+        // =================================================
+        // WHITELIST RENDER
+        // =================================================
+
+        function renderWhitelistItems(
+            container,
+            items,
+            valueKey,
+            removeAction
+        ) {
+
+            container.innerHTML =
+                '';
+
+            if (
+                !Array.isArray(
+                    items
+                ) ||
+                !items.length
+            ) {
+
+                const empty =
+                    document.createElement(
+                        'div'
+                    );
+
+                empty.className =
+                    'rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-400';
+
+                empty.textContent =
+                    'No entries yet.';
+
+                container.appendChild(
+                    empty
+                );
+
+                return;
+
+            }
+
+            items.forEach(
+                item => {
+
+                    const row =
+                        document.createElement(
+                            'div'
+                        );
+
+                    row.className =
+                        'flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3';
+
+                    const info =
+                        document.createElement(
+                            'div'
+                        );
+
+                    info.className =
+                        'min-w-0';
+
+                    const value =
+                        document.createElement(
+                            'div'
+                        );
+
+                    value.className =
+                        'break-all font-mono text-xs font-semibold text-slate-700';
+
+                    value.textContent =
+                        String(
+                            item?.[
+                                valueKey
+                            ] ||
+                            ''
+                        );
+
+                    info.appendChild(
+                        value
+                    );
+
+                    if (
+                        item?.label
+                    ) {
+
+                        const label =
+                            document.createElement(
+                                'div'
+                            );
+
+                        label.className =
+                            'mt-1 break-all text-xs text-slate-400';
+
+                        label.textContent =
+                            String(
+                                item.label
+                            );
+
+                        info.appendChild(
+                            label
+                        );
+
+                    }
+
+                    const removeButton =
+                        document.createElement(
+                            'button'
+                        );
+
+                    removeButton.type =
+                        'button';
+
+                    removeButton.className =
+                        'shrink-0 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100';
+
+                    removeButton.textContent =
+                        'Remove';
+
+                    removeButton.addEventListener(
+                        'click',
+                        async () => {
+
+                            const valueToRemove =
+                                String(
+                                    item?.[
+                                        valueKey
+                                    ] ||
+                                    ''
+                                );
+
+                            try {
+
+                                removeButton.disabled =
+                                    true;
+
+                                setWhitelistStatus(
+                                    `Removing ${valueToRemove}...`
+                                );
+
+                                const result =
+                                    await adminRequest(
+                                        removeAction,
+                                        valueKey ===
+                                            'ip'
+                                            ? {
+                                                ip:
+                                                    valueToRemove
+                                            }
+                                            : {
+                                                domain:
+                                                    valueToRemove
+                                            }
+                                    );
+
+                                renderWhitelist(
+                                    result.whitelist
+                                );
+
+                                setWhitelistStatus(
+                                    'Whitelist updated.',
+                                    'success'
+                                );
+
+                            } catch (
+                                error
+                            ) {
+
+                                removeButton.disabled =
+                                    false;
+
+                                setWhitelistStatus(
+                                    error.message,
+                                    'error'
+                                );
+
+                            }
+
+                        }
+                    );
+
+                    row.appendChild(
+                        info
+                    );
+
+                    row.appendChild(
+                        removeButton
+                    );
+
+                    container.appendChild(
+                        row
+                    );
+
+                }
+            );
+
+        }
+
+        function renderWhitelist(
+            whitelist
+        ) {
+
+            renderWhitelistItems(
+                ipWhitelistList,
+                whitelist?.ips,
+                'ip',
+                'remove-ip'
+            );
+
+            renderWhitelistItems(
+                domainWhitelistList,
+                whitelist?.domains,
+                'domain',
+                'remove-domain'
+            );
+
+        }
+
+        // =================================================
+        // LOAD WHITELIST
+        // =================================================
+
+        async function loadWhitelist() {
+
+            try {
+
+                loadWhitelistButton.disabled =
+                    true;
+
+                loadWhitelistButton.textContent =
+                    'Loading...';
+
+                setWhitelistStatus(
+                    'Loading whitelist...'
+                );
+
+                const result =
+                    await adminRequest(
+                        'list'
+                    );
+
+                renderWhitelist(
+                    result.whitelist
+                );
+
+                setWhitelistStatus(
+                    'Whitelist loaded.',
+                    'success'
+                );
+
+            } catch (
+                error
+            ) {
+
+                setWhitelistStatus(
+                    error.message,
+                    'error'
+                );
+
+            } finally {
+
+                loadWhitelistButton.disabled =
+                    false;
+
+                loadWhitelistButton.textContent =
+                    'Load Whitelist';
+
+            }
+
+        }
+
+        loadWhitelistButton.addEventListener(
+            'click',
+            loadWhitelist
+        );
+
+        // =================================================
+        // CURRENT BROWSER IP
+        // =================================================
+
+        getCurrentIpButton.addEventListener(
+            'click',
+            async () => {
+
+                try {
+
+                    getCurrentIpButton.disabled =
+                        true;
+
+                    getCurrentIpButton.textContent =
+                        'Loading...';
+
+                    const result =
+                        await adminRequest(
+                            'current-ip'
+                        );
+
+                    whitelistIpInput.value =
+                        String(
+                            result?.ip ||
+                            ''
+                        );
+
+                    setWhitelistStatus(
+                        `Browser request IP: ${String(result?.ip || '')}`,
+                        'success'
+                    );
+
+                } catch (
+                    error
                 ) {
 
-                    checkMembership();
+                    setWhitelistStatus(
+                        error.message,
+                        'error'
+                    );
+
+                } finally {
+
+                    getCurrentIpButton.disabled =
+                        false;
+
+                    getCurrentIpButton.textContent =
+                        'Browser IP';
 
                 }
 
             }
         );
 
-        phoneInput.addEventListener(
-            'keydown',
-            event => {
+        // =================================================
+        // ADD IP
+        // =================================================
+
+        addWhitelistIpButton.addEventListener(
+            'click',
+            async () => {
+
+                const ip =
+                    whitelistIpInput.value.trim();
+
+                const label =
+                    whitelistIpLabelInput.value.trim();
 
                 if (
-                    event.key ===
-                    'Enter' &&
-                    !checkButton.disabled
+                    !ip
                 ) {
 
-                    checkMembership();
+                    setWhitelistStatus(
+                        'Enter an IP address.',
+                        'error'
+                    );
+
+                    whitelistIpInput.focus();
+
+                    return;
+
+                }
+
+                try {
+
+                    addWhitelistIpButton.disabled =
+                        true;
+
+                    addWhitelistIpButton.textContent =
+                        'Adding...';
+
+                    const result =
+                        await adminRequest(
+                            'add-ip',
+                            {
+                                ip,
+                                label
+                            }
+                        );
+
+                    renderWhitelist(
+                        result.whitelist
+                    );
+
+                    whitelistIpInput.value =
+                        '';
+
+                    whitelistIpLabelInput.value =
+                        '';
+
+                    setWhitelistStatus(
+                        `IP ${ip} added.`,
+                        'success'
+                    );
+
+                } catch (
+                    error
+                ) {
+
+                    setWhitelistStatus(
+                        error.message,
+                        'error'
+                    );
+
+                } finally {
+
+                    addWhitelistIpButton.disabled =
+                        false;
+
+                    addWhitelistIpButton.textContent =
+                        'Add IP';
+
+                }
+
+            }
+        );
+
+        // =================================================
+        // ADD DOMAIN
+        // =================================================
+
+        addWhitelistDomainButton.addEventListener(
+            'click',
+            async () => {
+
+                const domain =
+                    whitelistDomainInput.value.trim();
+
+                const label =
+                    whitelistDomainLabelInput.value.trim();
+
+                if (
+                    !domain
+                ) {
+
+                    setWhitelistStatus(
+                        'Enter a domain name.',
+                        'error'
+                    );
+
+                    whitelistDomainInput.focus();
+
+                    return;
+
+                }
+
+                try {
+
+                    addWhitelistDomainButton.disabled =
+                        true;
+
+                    addWhitelistDomainButton.textContent =
+                        'Adding...';
+
+                    const result =
+                        await adminRequest(
+                            'add-domain',
+                            {
+                                domain,
+                                label
+                            }
+                        );
+
+                    renderWhitelist(
+                        result.whitelist
+                    );
+
+                    whitelistDomainInput.value =
+                        '';
+
+                    whitelistDomainLabelInput.value =
+                        '';
+
+                    setWhitelistStatus(
+                        `Domain ${domain} added.`,
+                        'success'
+                    );
+
+                } catch (
+                    error
+                ) {
+
+                    setWhitelistStatus(
+                        error.message,
+                        'error'
+                    );
+
+                } finally {
+
+                    addWhitelistDomainButton.disabled =
+                        false;
+
+                    addWhitelistDomainButton.textContent =
+                        'Add Domain';
 
                 }
 
@@ -1528,6 +2632,7 @@
 
                     connectionAccount.textContent =
                         `WHATSAPP STATE: ${String(state)}`;
+
                 }
 
             }

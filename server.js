@@ -1,5 +1,5 @@
 // FILE: server.js
-// Source basis: :contentReference[oaicite:1]{index=1}
+// Railway persistent-volume WhatsApp session version
 
 const express = require('express');
 const http = require('http');
@@ -1015,12 +1015,53 @@ function validateMembershipPayload(
 // WHATSAPP
 // =====================================================
 
+/*
+ * PERSISTENT WHATSAPP SESSION STORAGE
+ *
+ * Priority:
+ *
+ * 1. WWEBJS_AUTH_PATH
+ * 2. Railway Volume mount path + /.wwebjs_auth
+ * 3. Local fallback inside the project
+ *
+ * When a Railway Volume is attached, Railway automatically
+ * provides RAILWAY_VOLUME_MOUNT_PATH.
+ */
+
+const railwayVolumeMountPath =
+    String(
+        process.env.RAILWAY_VOLUME_MOUNT_PATH ||
+            ''
+    ).trim();
+
 const authPath =
-    process.env.WWEBJS_AUTH_PATH ||
-    path.join(
-        __dirname,
-        '.wwebjs_auth'
+    process.env.WWEBJS_AUTH_PATH
+        ? path.resolve(
+            process.env.WWEBJS_AUTH_PATH
+        )
+        : railwayVolumeMountPath
+            ? path.join(
+                railwayVolumeMountPath,
+                '.wwebjs_auth'
+            )
+            : path.join(
+                __dirname,
+                '.wwebjs_auth'
+            );
+
+if (
+    !process.env.WWEBJS_AUTH_PATH &&
+    !railwayVolumeMountPath
+) {
+    console.warn(
+        'WARNING: No Railway Volume detected. WhatsApp session storage is not persistent.'
     );
+}
+
+console.log(
+    'WhatsApp auth storage path:',
+    authPath
+);
 
 const client =
     new Client({

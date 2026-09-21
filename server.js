@@ -192,26 +192,21 @@ function createDatabasePool() {
 
         return mysql.createPool({
             host: url.hostname,
-
             port: Number(
                 url.port || 3306
             ),
-
             user: decodeURIComponent(
                 url.username
             ),
-
             password: decodeURIComponent(
                 url.password
             ),
-
             database: decodeURIComponent(
                 url.pathname.replace(
                     /^\/+/,
                     ''
                 )
             ),
-
             charset: 'utf8mb4',
             waitForConnections: true,
             connectionLimit: 10,
@@ -260,7 +255,7 @@ async function initDatabase() {
         );
 
         /*
-         * Permanently remove obsolete tables.
+         * Remove obsolete tables that are no longer used.
          */
         await db.query(`
             DROP TABLE IF EXISTS
@@ -270,38 +265,16 @@ async function initDatabase() {
         `);
 
         /*
-         * API whitelist entries.
+         * API whitelist.
          *
-         * ONE ROW = ONE exact domain + API-server-IP pair.
+         * ONLY the domain is stored and checked.
+         * The whitelist table intentionally contains no IP,
+         * label, enabled, or other unused columns.
          *
-         * Example:
-         *
-         * domain_name     ip_address
-         * example.com     203.0.113.10
-         *
-         * The public API checks that the actual HTTP source IP
-         * and decrypted domain exist together on this same row.
+         * Older api_whitelist versions are migrated so existing
+         * domains are preserved and duplicate domains are merged.
          */
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS api_whitelist (
-                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-                domain_name VARCHAR(253) NOT NULL,
-                ip_address VARCHAR(45) NOT NULL,
-                label VARCHAR(100) DEFAULT NULL,
-                enabled TINYINT(1) NOT NULL DEFAULT 1,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                    ON UPDATE CURRENT_TIMESTAMP,
-
-                PRIMARY KEY (id),
-                UNIQUE KEY unique_domain_ip (domain_name, ip_address),
-                INDEX idx_whitelist_enabled (enabled),
-                INDEX idx_whitelist_domain_ip (domain_name, ip_address)
-            )
-            ENGINE=InnoDB
-            DEFAULT CHARSET=utf8mb4
-            COLLATE=utf8mb4_unicode_ci
-        `);
+        await ensureDomainOnlyWhitelistTable();
 
         console.log(
             'Database ready.'
@@ -315,6 +288,149 @@ async function initDatabase() {
 
         db = null;
     }
+}
+
+async function ensureDomainOnlyWhitelistTable() {
+    const pool =
+        await requireDatabaseWithoutCheck();
+
+    const [tableRows] =
+        await pool.execute(
+            `
+            SELECT COUNT(*) AS table_exists
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = 'api_whitelist'
+            `
+        );
+
+    const tableExists =
+        Number(
+            tableRows[0]?.table_exists || 0
+        ) > 0;
+
+    const createTable =
+        async tableName => {
+            await pool.query(`
+                CREATE TABLE ${tableName} (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    domain_name VARCHAR(253) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY unique_domain_name (domain_name)
+                )
+                ENGINE=InnoDB
+                DEFAULT CHARSET=utf8mb4
+                COLLATE=utf8mb4_unicode_ci
+            `);
+        };
+
+    if (!tableExists) {
+        await createTable(
+            'api_whitelist'
+        );
+
+        return;
+    }
+
+    const [columns] =
+        await pool.query(
+            'SHOW COLUMNS FROM api_whitelist'
+        );
+
+    const columnNames =
+        new Set(
+            columns.map(
+                column =>
+                    String(
+                        column.Field
+                    )
+            )
+        );
+
+    const [indexes] =
+        await pool.query(
+            'SHOW INDEX FROM api_whitelist'
+        );
+
+    const hasUniqueDomain =
+        indexes.some(
+            index =>
+                Number(
+                    index.Non_unique
+                ) === 0 &&
+                String(
+                    index.Column_name
+                ) ===
+                    'domain_name'
+        );
+
+    const hasOnlyRequiredColumns =
+        columnNames.size === 3 &&
+        columnNames.has('id') &&
+        columnNames.has('domain_name') &&
+        columnNames.has('created_at');
+
+    if (
+        hasOnlyRequiredColumns &&
+        hasUniqueDomain
+    ) {
+        return;
+    }
+
+    const migrationTable =
+        'api_whitelist_domain_only_migration';
+
+    await pool.query(
+        `DROP TABLE IF EXISTS ${migrationTable}`
+    );
+
+    await createTable(
+        migrationTable
+    );
+
+    if (
+        columnNames.has('domain_name')
+    ) {
+        const createdAtExpression =
+            columnNames.has(
+                'created_at'
+            )
+                ? 'MIN(created_at)'
+                : 'CURRENT_TIMESTAMP';
+
+        await pool.query(`
+            INSERT IGNORE INTO ${migrationTable} (
+                domain_name,
+                created_at
+            )
+            SELECT
+                LOWER(TRIM(domain_name)) AS domain_name,
+                ${createdAtExpression} AS created_at
+            FROM api_whitelist
+            WHERE domain_name IS NOT NULL
+              AND TRIM(domain_name) <> ''
+            GROUP BY LOWER(TRIM(domain_name))
+        `);
+    }
+
+    await pool.query(
+        'DROP TABLE api_whitelist'
+    );
+
+    await pool.query(
+        `RENAME TABLE ${migrationTable} TO api_whitelist`
+    );
+}
+
+async function requireDatabaseWithoutCheck() {
+    if (!db) {
+        throw new Error(
+            'Database is unavailable.'
+        );
+    }
+
+    return db;
 }
 
 async function requireDatabase() {
@@ -337,12 +453,16 @@ function normalizeIpAddress(value) {
     ).trim();
 
     if (
-        ip.startsWith('::ffff:')
+        ip.startsWith(
+            '::ffff:'
+        )
     ) {
         ip = ip.slice(7);
     }
 
-    if (!net.isIP(ip)) {
+    if (
+        !net.isIP(ip)
+    ) {
         throw new Error(
             'Invalid IP address.'
         );
@@ -371,12 +491,24 @@ function normalizeDomain(value) {
     }
 
     if (
-        domain.includes('://') ||
-        domain.includes('/') ||
-        domain.includes('\\') ||
-        domain.includes(':') ||
-        domain.includes('@') ||
-        domain.includes(' ')
+        domain.includes(
+            '://'
+        ) ||
+        domain.includes(
+            '/'
+        ) ||
+        domain.includes(
+            '\\'
+        ) ||
+        domain.includes(
+            ':'
+        ) ||
+        domain.includes(
+            '@'
+        ) ||
+        domain.includes(
+            ' '
+        )
     ) {
         throw new Error(
             'Domain must be hostname only.'
@@ -417,118 +549,26 @@ function normalizeDomain(value) {
     return domain;
 }
 
-function sanitizeLabel(value) {
-    const label = String(
-        value ?? ''
-    )
-        .normalize('NFKC')
-        .trim()
-        .replace(/\s+/g, ' ');
-
-    if (
-        label.length > 100
-    ) {
-        throw new Error(
-            'Label is too long.'
-        );
-    }
-
-    return label;
-}
-
-function getRequestIpCandidates(req) {
-    const candidates = [];
-
-    const add = value => {
-        if (!value) {
-            return;
-        }
-
-        try {
-            const normalized =
-                normalizeIpAddress(value);
-
-            if (
-                !candidates.includes(
-                    normalized
-                )
-            ) {
-                candidates.push(
-                    normalized
-                );
-            }
-
-        } catch (_) {}
-    };
-
-    /*
-     * With app.set('trust proxy', 1), Express resolves req.ip
-     * to the original caller IP behind the Railway proxy.
-     */
-    add(
-        req.ip
-    );
-
-    /*
-     * req.ips contains the trusted-proxy chain resolved by Express.
-     */
-    if (
-        Array.isArray(
-            req.ips
-        )
-    ) {
-        for (
-            const ip of req.ips
-        ) {
-            add(ip);
-        }
-    }
-
-    /*
-     * Fallback for deployments where the proxy header is available
-     * but Express did not resolve it as expected.
-     */
-    const forwarded =
-        req.headers?.[
-            'x-forwarded-for'
-        ];
-
-    if (
-        typeof forwarded ===
-        'string'
-    ) {
-        for (
-            const value of
-            forwarded.split(',')
-        ) {
-            add(
-                value.trim()
-            );
-        }
-    }
-
-    add(
-        req.socket?.remoteAddress
-    );
-
-    return candidates;
-}
-
 function getClientIp(req) {
-    return (
-        getRequestIpCandidates(
-            req
-        )[0] ||
-        '0.0.0.0'
-    );
+    let ip =
+        req.ip ||
+        req.socket?.remoteAddress ||
+        '0.0.0.0';
+
+    try {
+        return normalizeIpAddress(
+            ip
+        );
+    } catch (_) {
+        return '0.0.0.0';
+    }
 }
 
 // =====================================================
 // WHITELIST DB
 // =====================================================
 
-async function isWhitelistedPair(
-    ipCandidates,
+async function isWhitelistedDomain(
     domain
 ) {
     const pool =
@@ -539,110 +579,20 @@ async function isWhitelistedPair(
             domain
         );
 
-    const candidates =
-        Array.isArray(ipCandidates)
-            ? ipCandidates
-            : [
-                  ipCandidates
-              ];
-
-    const normalizedIps = [];
-
-    for (
-        const value of candidates
-    ) {
-        try {
-            const normalized =
-                normalizeIpAddress(
-                    value
-                );
-
-            if (
-                !normalizedIps.includes(
-                    normalized
-                )
-            ) {
-                normalizedIps.push(
-                    normalized
-                );
-            }
-
-        } catch (_) {}
-    }
-
-    if (
-        !normalizedIps.length
-    ) {
-        return {
-            matched: false,
-            sourceIp: null,
-            domain:
-                normalizedDomain
-        };
-    }
-
-    /*
-     * IMPORTANT:
-     *
-     * IP + DOMAIN must match the SAME api_whitelist row.
-     */
-    const placeholders =
-        normalizedIps
-            .map(
-                () => '?'
-            )
-            .join(', ');
-
     const [rows] =
         await pool.execute(
             `
-            SELECT
-                id,
-                domain_name,
-                ip_address
+            SELECT id
             FROM api_whitelist
-            WHERE enabled = 1
-              AND domain_name = ?
-              AND ip_address IN (${placeholders})
+            WHERE domain_name = ?
             LIMIT 1
             `,
             [
-                normalizedDomain,
-                ...normalizedIps
+                normalizedDomain
             ]
         );
 
-    if (
-        !rows.length
-    ) {
-        return {
-            matched: false,
-            sourceIp:
-                normalizedIps[0] ||
-                null,
-            domain:
-                normalizedDomain
-        };
-    }
-
-    return {
-        matched: true,
-
-        sourceIp:
-            String(
-                rows[0].ip_address
-            ),
-
-        domain:
-            String(
-                rows[0].domain_name
-            ),
-
-        whitelistId:
-            Number(
-                rows[0].id
-            )
-    };
+    return rows.length > 0;
 }
 
 async function listWhitelist() {
@@ -654,115 +604,70 @@ async function listWhitelist() {
             SELECT
                 id,
                 domain_name AS domain,
-                ip_address AS ip,
-                label,
-                enabled,
-                created_at,
-                updated_at
+                created_at
             FROM api_whitelist
             ORDER BY id ASC
         `);
 
     return {
-        entries: rows.map(
-            row => ({
-                id: Number(
-                    row.id
-                ),
+        entries:
+            rows.map(
+                row => ({
+                    id:
+                        Number(
+                            row.id
+                        ),
 
-                domain:
-                    String(
-                        row.domain
-                    ),
+                    domain:
+                        String(
+                            row.domain
+                        ),
 
-                ip:
-                    String(
-                        row.ip
-                    ),
-
-                label:
-                    row.label == null
-                        ? ''
-                        : String(
-                              row.label
-                          ),
-
-                enabled:
-                    Boolean(
-                        row.enabled
-                    ),
-
-                createdAt:
-                    row.created_at,
-
-                updatedAt:
-                    row.updated_at
-            })
-        )
+                    createdAt:
+                        row.created_at
+                })
+            )
     };
 }
 
-async function addWhitelistEntry(
-    ip,
-    domain,
-    label = ''
+async function addWhitelistDomain(
+    domain
 ) {
     const pool =
         await requireDatabase();
-
-    const normalizedIp =
-        normalizeIpAddress(
-            ip
-        );
 
     const normalizedDomain =
         normalizeDomain(
             domain
         );
 
-    const cleanLabel =
-        sanitizeLabel(
-            label
-        );
-
     await pool.execute(
         `
         INSERT INTO api_whitelist (
-            domain_name,
-            ip_address,
-            label,
-            enabled
+            domain_name
         )
-        VALUES (?, ?, ?, 1)
+        VALUES (?)
         ON DUPLICATE KEY UPDATE
-            label = VALUES(label),
-            enabled = 1,
-            updated_at = CURRENT_TIMESTAMP
+            domain_name = VALUES(domain_name)
         `,
         [
-            normalizedDomain,
-            normalizedIp,
-            cleanLabel || null
+            normalizedDomain
         ]
     );
 
-    return {
-        domain:
-            normalizedDomain,
-
-        ip:
-            normalizedIp
-    };
+    return normalizedDomain;
 }
 
-async function removeWhitelistEntry(
+async function removeWhitelistDomain(
     id
 ) {
     const pool =
         await requireDatabase();
 
     const numericId =
-        Number(id);
+        Number(
+            id
+        );
 
     if (
         !Number.isSafeInteger(
@@ -818,14 +723,12 @@ function consumeRateLimit(
             {
                 windowStartedAt:
                     now,
-
                 count: 1
             }
         );
 
         return {
             allowed: true,
-
             retryAfterSeconds:
                 Math.ceil(
                     windowMs /
@@ -842,11 +745,9 @@ function consumeRateLimit(
     ) {
         return {
             allowed: false,
-
             retryAfterSeconds:
                 Math.max(
                     1,
-
                     Math.ceil(
                         (
                             windowMs -
@@ -863,7 +764,6 @@ function consumeRateLimit(
 
     return {
         allowed: true,
-
         retryAfterSeconds:
             Math.ceil(
                 windowMs /
@@ -914,7 +814,9 @@ function deriveAesKey(
             'sha256'
         )
         .update(
-            String(secret),
+            String(
+                secret
+            ),
             'utf8'
         )
         .digest();
@@ -1011,7 +913,6 @@ function encryptObject(
             cipher.update(
                 plaintext
             ),
-
             cipher.final()
         ]);
 
@@ -1020,19 +921,15 @@ function encryptObject(
 
     return [
         'v1',
-
         toBase64Url(
             iv
         ),
-
         toBase64Url(
             authTag
         ),
-
         toBase64Url(
             ciphertext
         )
-
     ].join('.');
 }
 
@@ -1115,7 +1012,6 @@ function decryptObject(
                 decipher.update(
                     ciphertext
                 ),
-
                 decipher.final()
             ]);
 
@@ -1206,7 +1102,6 @@ function consumeNonce(
 
     map.set(
         nonce,
-
         Date.now() +
             PAYLOAD_NONCE_TTL_MS
     );
@@ -1329,7 +1224,9 @@ function normalizeLocalPhoneNumber(
     }
 
     if (
-        raw.includes('+')
+        raw.includes(
+            '+'
+        )
     ) {
         throw new Error(
             'Phone number must not contain a country code.'
@@ -1395,7 +1292,6 @@ function normalizeLocalPhoneNumber(
 
     return {
         local,
-
         international
     };
 }
@@ -1405,7 +1301,6 @@ function validateMembershipPayload(
 ) {
     assertAllowedKeys(
         payload,
-
         new Set([
             'version',
             'timestamp',
@@ -1480,16 +1375,13 @@ function validateAdminPayload(
 ) {
     assertAllowedKeys(
         payload,
-
         new Set([
             'version',
             'timestamp',
             'nonce',
             'action',
             'id',
-            'ip',
-            'domain',
-            'label'
+            'domain'
         ])
     );
 
@@ -1521,9 +1413,8 @@ function validateAdminPayload(
     const allowedActions =
         new Set([
             'list',
-            'current-ip',
-            'add-entry',
-            'remove-entry'
+            'add-domain',
+            'remove-domain'
         ]);
 
     if (
@@ -1543,7 +1434,6 @@ function validateAdminPayload(
             payload.id == null
                 ? null
                 : (() => {
-
                       const numericId =
                           Number(
                               payload.id
@@ -1561,27 +1451,14 @@ function validateAdminPayload(
                       }
 
                       return numericId;
-
                   })(),
-
-        ip:
-            payload.ip == null
-                ? null
-                : normalizeIpAddress(
-                      payload.ip
-                  ),
 
         domain:
             payload.domain == null
                 ? null
                 : normalizeDomain(
                       payload.domain
-                  ),
-
-        label:
-            sanitizeLabel(
-                payload.label
-            )
+                  )
     };
 }
 
@@ -1660,9 +1537,7 @@ async function getGroupList() {
                 const chat of
                 collections.Chat.getModelsArray()
             ) {
-
                 try {
-
                     const id =
                         chat?.id
                             ?._serialized ||
@@ -1710,7 +1585,6 @@ async function getGroupList() {
                     );
 
                 } catch (_) {}
-
             }
 
             return Array.from(
@@ -1743,7 +1617,6 @@ async function fetchGroupParticipantsWithPhones(
 
     return client.pupPage.evaluate(
         async requestedGroupId => {
-
             const collections =
                 window.require(
                     'WAWebCollections'
@@ -1793,7 +1666,6 @@ async function fetchGroupParticipantsWithPhones(
             }
 
             try {
-
                 await groupQuery
                     .queryAndUpdateGroupMetadataById(
                         {
@@ -1801,15 +1673,12 @@ async function fetchGroupParticipantsWithPhones(
                                 requestedGroupId
                         }
                     );
-
             } catch (error) {
-
                 console.warn(
                     'Group metadata refresh warning:',
                     error?.message ||
                         String(error)
                 );
-
             }
 
             group =
@@ -1834,7 +1703,6 @@ async function fetchGroupParticipantsWithPhones(
                 const participant of
                 participants
             ) {
-
                 const id =
                     participant?.id;
 
@@ -1859,7 +1727,6 @@ async function fetchGroupParticipantsWithPhones(
                     id.server ===
                     'c.us'
                 ) {
-
                     const digits =
                         String(
                             id.user ||
@@ -1869,9 +1736,7 @@ async function fetchGroupParticipantsWithPhones(
                             ''
                         );
 
-                    if (
-                        digits
-                    ) {
+                    if (digits) {
                         phoneNumbers.push(
                             digits
                         );
@@ -1884,7 +1749,6 @@ async function fetchGroupParticipantsWithPhones(
                     id.server ===
                     'lid'
                 ) {
-
                     unresolvedLids.push(
                         String(
                             serialized
@@ -1892,7 +1756,6 @@ async function fetchGroupParticipantsWithPhones(
                     );
 
                     try {
-
                         let resolved =
                             null;
 
@@ -1903,14 +1766,12 @@ async function fetchGroupParticipantsWithPhones(
                                 .enforceLidAndPnRetrieval ===
                                 'function'
                         ) {
-
                             resolved =
                                 await window
                                     .WWebJS
                                     .enforceLidAndPnRetrieval(
                                         serialized
                                     );
-
                         }
 
                         const phoneId =
@@ -1934,7 +1795,6 @@ async function fetchGroupParticipantsWithPhones(
                                 '@c.us'
                             )
                         ) {
-
                             const digits =
                                 phoneId
                                     .slice(
@@ -1946,18 +1806,14 @@ async function fetchGroupParticipantsWithPhones(
                                         ''
                                     );
 
-                            if (
-                                digits
-                            ) {
+                            if (digits) {
                                 phoneNumbers.push(
                                     digits
                                 );
                             }
-
                         }
 
                     } catch (error) {
-
                         console.warn(
                             `Could not resolve LID ${serialized}:`,
                             error?.message ||
@@ -1965,13 +1821,11 @@ async function fetchGroupParticipantsWithPhones(
                                     error
                                 )
                         );
-
                     }
                 }
             }
 
             return {
-
                 groupName:
                     String(
                         group.formattedTitle ||
@@ -1988,10 +1842,8 @@ async function fetchGroupParticipantsWithPhones(
 
                 unresolvedLidCount:
                     unresolvedLids.length
-
             };
         },
-
         groupId
     );
 }
@@ -2032,7 +1884,6 @@ async function fetchGroupMemberCache(
         );
 
     const cacheEntry = {
-
         groupId:
             normalizedGroupId,
 
@@ -2059,7 +1910,6 @@ async function fetchGroupMemberCache(
 
         fetchedAt:
             Date.now()
-
     };
 
     groupMemberCache.set(
@@ -2101,12 +1951,10 @@ async function getGroupMemberCache(
         ) <
             GROUP_MEMBER_CACHE_TTL_MS
     ) {
-
         return {
             ...existing,
             fromCache: true
         };
-
     }
 
     if (
@@ -2114,7 +1962,6 @@ async function getGroupMemberCache(
             normalizedGroupId
         )
     ) {
-
         const refreshed =
             await groupMemberRefreshes.get(
                 normalizedGroupId
@@ -2124,7 +1971,6 @@ async function getGroupMemberCache(
             ...refreshed,
             fromCache: false
         };
-
     }
 
     const refreshPromise =
@@ -2138,7 +1984,6 @@ async function getGroupMemberCache(
     );
 
     try {
-
         const refreshed =
             await refreshPromise;
 
@@ -2148,11 +1993,9 @@ async function getGroupMemberCache(
         };
 
     } finally {
-
         groupMemberRefreshes.delete(
             normalizedGroupId
         );
-
     }
 }
 
@@ -2174,9 +2017,7 @@ async function checkGroupMembership(
             phoneValue
         );
 
-    if (
-        !whatsappReady
-    ) {
+    if (!whatsappReady) {
         throw new Error(
             'WhatsApp is not ready.'
         );
@@ -2197,7 +2038,6 @@ async function checkGroupMembership(
         );
 
     return {
-
         phoneNumber:
             phone.local,
 
@@ -2230,7 +2070,6 @@ async function checkGroupMembership(
                 GROUP_MEMBER_CACHE_TTL_MS /
                     1000
             )
-
     };
 }
 
@@ -2243,7 +2082,6 @@ async function requireEncryptedMembershipRequest(
     res,
     next
 ) {
-
     if (
         req.method !==
         'POST'
@@ -2252,20 +2090,13 @@ async function requireEncryptedMembershipRequest(
             .status(405)
             .json({
                 success: false,
-
                 error:
                     'POST only.'
             });
     }
 
-    const sourceIpCandidates =
-        getRequestIpCandidates(
-            req
-        );
-
     const sourceIp =
-        sourceIpCandidates[0] ||
-        '0.0.0.0';
+        getClientIp(req);
 
     /*
      * RATE LIMIT BY ACTUAL SOURCE IP
@@ -2273,11 +2104,8 @@ async function requireEncryptedMembershipRequest(
     const sourceRate =
         consumeRateLimit(
             rateLimitBuckets,
-
             `source:${sourceIp}`,
-
             API_RATE_LIMIT,
-
             API_RATE_WINDOW_MS
         );
 
@@ -2288,10 +2116,8 @@ async function requireEncryptedMembershipRequest(
     if (
         !sourceRate.allowed
     ) {
-
         res.setHeader(
             'Retry-After',
-
             String(
                 sourceRate.retryAfterSeconds
             )
@@ -2300,13 +2126,9 @@ async function requireEncryptedMembershipRequest(
         return res
             .status(429)
             .json({
-
-                success:
-                    false,
-
+                success: false,
                 error:
                     'Too many requests from this IP.'
-
             });
     }
 
@@ -2331,31 +2153,24 @@ async function requireEncryptedMembershipRequest(
             req.body
         ).length !== 1
     ) {
-
         return res
             .status(400)
             .json({
-
-                success:
-                    false,
-
+                success: false,
                 error:
                     'Only encrypted payload is accepted.'
-
             });
     }
 
     let decrypted;
 
     try {
-
         /*
          * DECRYPT PAYLOAD
          */
         decrypted =
             decryptObject(
                 req.body.payload,
-
                 process.env
                     .API_ENCRYPTION_SECRET
             );
@@ -2369,79 +2184,53 @@ async function requireEncryptedMembershipRequest(
             );
 
         /*
-         * SOURCE IP + DOMAIN WHITELIST
+         * DOMAIN WHITELIST ONLY
          *
-         * Both values MUST match the SAME
-         * enabled row in api_whitelist.
+         * Authorization is based ONLY on the encrypted domain.
+         * The request source IP is not consulted for whitelist
+         * authorization.
          */
-        const whitelistResult =
-            await isWhitelistedPair(
-                sourceIpCandidates,
+        const domainWhitelisted =
+            await isWhitelistedDomain(
                 data.domain
             );
 
         console.log(
-            'WHITELIST CHECK:',
-
+            'DOMAIN WHITELIST CHECK:',
             JSON.stringify({
-
                 domain:
                     data.domain,
-
-                detectedSourceIp:
-                    sourceIp,
-
-                candidateSourceIps:
-                    sourceIpCandidates,
-
-                matched:
-                    whitelistResult.matched,
-
-                matchedIp:
-                    whitelistResult.sourceIp ||
-                    null,
-
-                whitelistId:
-                    whitelistResult.whitelistId ||
-                    null
-
+                whitelisted:
+                    domainWhitelisted
             })
         );
 
         if (
-            !whitelistResult.matched
+            !domainWhitelisted
         ) {
-
             return res
                 .status(403)
                 .json({
-
                     success:
                         false,
-
                     error:
-                        'Request IP and domain are not whitelisted as a pair.',
-
-                    detectedIp:
-                        sourceIp,
-
+                        'Request domain is not whitelisted.',
                     requestDomain:
                         data.domain
-
                 });
         }
 
         /*
          * RATE LIMIT BY ENCRYPTED CLIENT IP
+         *
+         * This allows your website backend to provide
+         * the end-user IP separately.
          */
         const clientRate =
             consumeRateLimit(
                 rateLimitBuckets,
-
                 `client:${data.clientIp}`,
-
                 API_RATE_LIMIT,
-
                 API_RATE_WINDOW_MS
             );
 
@@ -2452,10 +2241,8 @@ async function requireEncryptedMembershipRequest(
         if (
             !clientRate.allowed
         ) {
-
             res.setHeader(
                 'Retry-After',
-
                 String(
                     clientRate.retryAfterSeconds
                 )
@@ -2464,29 +2251,24 @@ async function requireEncryptedMembershipRequest(
             return res
                 .status(429)
                 .json({
-
-                    success:
-                        false,
-
+                    success: false,
                     error:
                         'Too many requests for this client IP.'
-
                 });
         }
 
         /*
          * Store the validated encrypted payload.
+         *
+         * The encrypted domain has already been checked
+         * against api_whitelist above.
          */
         req.encryptedPayload =
             data;
 
-        req.sourceIp =
-            sourceIp;
-
         return next();
 
     } catch (error) {
-
         console.error(
             'Encrypted API validation failed:',
             error.message
@@ -2496,30 +2278,21 @@ async function requireEncryptedMembershipRequest(
             error.message ===
             'Replay detected.'
         ) {
-
             return res
                 .status(409)
                 .json({
-
-                    success:
-                        false,
-
+                    success: false,
                     error:
                         'Replay detected.'
-
                 });
         }
 
         return res
             .status(400)
             .json({
-
-                success:
-                    false,
-
+                success: false,
                 error:
                     'Invalid or expired encrypted request.'
-
             });
     }
 }
@@ -2530,16 +2303,12 @@ async function requireEncryptedMembershipRequest(
 
 app.post(
     '/api/check-group-membership',
-
     requireEncryptedMembershipRequest,
-
     async (
         req,
         res
     ) => {
-
         try {
-
             const payload =
                 req.encryptedPayload;
 
@@ -2552,16 +2321,12 @@ app.post(
             return res
                 .status(200)
                 .json({
-
                     success:
                         true,
-
                     ...result
-
                 });
 
         } catch (error) {
-
             console.error(
                 'Membership API error:',
                 error.message
@@ -2571,17 +2336,13 @@ app.post(
                 error.message ===
                 'WhatsApp is not ready.'
             ) {
-
                 return res
                     .status(503)
                     .json({
-
                         success:
                             false,
-
                         error:
                             'WhatsApp is not ready.'
-
                     });
             }
 
@@ -2589,30 +2350,23 @@ app.post(
                 error.message ===
                 'Target group was not found.'
             ) {
-
                 return res
                     .status(404)
                     .json({
-
                         success:
                             false,
-
                         error:
                             'Target group was not found.'
-
                     });
             }
 
             return res
                 .status(500)
                 .json({
-
                     success:
                         false,
-
                     error:
                         'Membership check failed.'
-
                 });
         }
     }
@@ -2627,20 +2381,14 @@ function requireAdminEncryptedRequest(
     res,
     next
 ) {
-
     const sourceIp =
-        getClientIp(
-            req
-        );
+        getClientIp(req);
 
     const rate =
         consumeRateLimit(
             adminRateLimitBuckets,
-
             `admin:${sourceIp}`,
-
             ADMIN_RATE_LIMIT,
-
             ADMIN_RATE_WINDOW_MS
         );
 
@@ -2651,10 +2399,8 @@ function requireAdminEncryptedRequest(
     if (
         !rate.allowed
     ) {
-
         res.setHeader(
             'Retry-After',
-
             String(
                 rate.retryAfterSeconds
             )
@@ -2663,13 +2409,10 @@ function requireAdminEncryptedRequest(
         return res
             .status(429)
             .json({
-
                 success:
                     false,
-
                 error:
                     'Too many administration requests.'
-
             });
     }
 
@@ -2687,26 +2430,20 @@ function requireAdminEncryptedRequest(
             req.body
         ).length !== 1
     ) {
-
         return res
             .status(400)
             .json({
-
                 success:
                     false,
-
                 error:
                     'Only encrypted payload is accepted.'
-
             });
     }
 
     try {
-
         const decrypted =
             decryptObject(
                 req.body.payload,
-
                 process.env
                     .WHITELIST_ADMIN_KEY
             );
@@ -2719,7 +2456,6 @@ function requireAdminEncryptedRequest(
         return next();
 
     } catch (error) {
-
         console.error(
             'Admin encrypted request failed:',
             error.message
@@ -2729,30 +2465,23 @@ function requireAdminEncryptedRequest(
             error.message ===
             'Replay detected.'
         ) {
-
             return res
                 .status(409)
                 .json({
-
                     success:
                         false,
-
                     error:
                         'Replay detected.'
-
                 });
         }
 
         return res
             .status(401)
             .json({
-
                 success:
                     false,
-
                 error:
                     'Invalid or expired admin request.'
-
             });
     }
 }
@@ -2763,16 +2492,12 @@ function requireAdminEncryptedRequest(
 
 app.post(
     '/api/admin/whitelist',
-
     requireAdminEncryptedRequest,
-
     async (
         req,
         res
     ) => {
-
         try {
-
             const payload =
                 req.adminPayload;
 
@@ -2781,112 +2506,74 @@ app.post(
             ) {
 
                 case 'list':
-
                     return res
                         .status(200)
                         .json({
-
                             success:
                                 true,
-
                             whitelist:
                                 await listWhitelist()
-
                         });
 
-                case 'current-ip':
-
-                    return res
-                        .status(200)
-                        .json({
-
-                            success:
-                                true,
-
-                            ip:
-                                getClientIp(
-                                    req
-                                )
-
-                        });
-
-                case 'add-entry':
+                case 'add-domain':
 
                     if (
-                        !payload.ip ||
                         !payload.domain
                     ) {
-
                         return res
                             .status(400)
                             .json({
-
                                 success:
                                     false,
-
                                 error:
-                                    'Both domain and IP are required.'
-
+                                    'Domain is required.'
                             });
                     }
 
-                    await addWhitelistEntry(
-                        payload.ip,
-                        payload.domain,
-                        payload.label
+                    await addWhitelistDomain(
+                        payload.domain
                     );
 
                     console.log(
-                        'WHITELIST ENTRY ADDED:',
-
-                        `${payload.domain} + ${payload.ip}`
+                        'WHITELIST DOMAIN ADDED:',
+                        payload.domain
                     );
 
                     return res
                         .status(200)
                         .json({
-
                             success:
                                 true,
-
                             whitelist:
                                 await listWhitelist()
-
                         });
 
-                case 'remove-entry':
+                case 'remove-domain':
 
                     if (
                         !payload.id
                     ) {
-
                         return res
                             .status(400)
                             .json({
-
                                 success:
                                     false,
-
                                 error:
                                     'Whitelist entry ID is required.'
-
                             });
                     }
 
-                    await removeWhitelistEntry(
+                    await removeWhitelistDomain(
                         payload.id
                     );
 
                     return res
                         .status(200)
                         .json({
-
                             success:
                                 true,
-
                             whitelist:
                                 await listWhitelist()
-
                         });
 
                 default:
@@ -2894,18 +2581,14 @@ app.post(
                     return res
                         .status(400)
                         .json({
-
                             success:
                                 false,
-
                             error:
                                 'Invalid admin action.'
-
                         });
             }
 
         } catch (error) {
-
             console.error(
                 'Whitelist admin error:',
                 error.message
@@ -2914,13 +2597,10 @@ app.post(
             return res
                 .status(500)
                 .json({
-
                     success:
                         false,
-
                     error:
                         'Whitelist administration failed.'
-
                 });
         }
     }
@@ -2932,7 +2612,6 @@ app.post(
 
 io.on(
     'connection',
-
     socket => {
 
         console.log(
@@ -2944,7 +2623,6 @@ io.on(
             latestQr &&
             !whatsappReady
         ) {
-
             socket.emit(
                 'qr',
                 latestQr
@@ -2953,13 +2631,10 @@ io.on(
             socket.emit(
                 'status',
                 {
-
                     type:
                         'warning',
-
                     message:
                         'Scan the QR code to connect WhatsApp.'
-
                 }
             );
         }
@@ -2967,14 +2642,11 @@ io.on(
         if (
             whatsappReady
         ) {
-
             socket.emit(
                 'ready',
                 {
-
                     message:
                         'WhatsApp is connected.'
-
                 }
             );
 
@@ -2985,43 +2657,32 @@ io.on(
         } else if (
             !latestQr
         ) {
-
             socket.emit(
                 'status',
                 {
-
                     type:
                         'info',
-
                     message:
                         'Starting WhatsApp...'
-
                 }
             );
         }
 
         socket.on(
             'getGroups',
-
             async () => {
-
                 try {
-
                     await sendGroups(
                         socket
                     );
-
                 } catch (
                     error
                 ) {
-
                     socket.emit(
                         'groupListError',
                         error.message
                     );
-
                 }
-
             }
         );
 
@@ -3033,11 +2694,8 @@ io.on(
          */
         socket.on(
             'checkGroupMembership',
-
             async data => {
-
                 try {
-
                     const result =
                         await checkGroupMembership(
                             data?.groupId,
@@ -3052,7 +2710,6 @@ io.on(
                 } catch (
                     error
                 ) {
-
                     console.error(
                         'Socket membership check error:',
                         error.message
@@ -3062,39 +2719,30 @@ io.on(
                         'groupMembershipError',
                         error.message
                     );
-
                 }
-
             }
         );
 
         socket.on(
             'disconnect',
-
             () => {
-
                 console.log(
                     'Browser disconnected:',
                     socket.id
                 );
-
             }
         );
-
     }
 );
 
 async function sendGroups(
     socket
 ) {
-
     if (
         !whatsappReady
     ) {
-
         socket.emit(
             'groupListError',
-
             'WhatsApp is not ready yet.'
         );
 
@@ -3102,7 +2750,6 @@ async function sendGroups(
     }
 
     try {
-
         const groups =
             await getGroupList();
 
@@ -3114,20 +2761,16 @@ async function sendGroups(
         socket.emit(
             'status',
             {
-
                 type:
                     'success',
-
                 message:
                     `Loaded ${groups.length} groups.`
-
             }
         );
 
     } catch (
         error
     ) {
-
         console.error(
             'Group list fetch failed:',
             error.message
@@ -3146,7 +2789,6 @@ async function sendGroups(
 
 client.on(
     'qr',
-
     async qr => {
 
         console.log(
@@ -3154,7 +2796,6 @@ client.on(
         );
 
         try {
-
             const url =
                 await qrcode.toDataURL(
                     qr
@@ -3171,20 +2812,16 @@ client.on(
             io.emit(
                 'status',
                 {
-
                     type:
                         'warning',
-
                     message:
                         'Scan the QR code to connect WhatsApp.'
-
                 }
             );
 
         } catch (
             error
         ) {
-
             console.error(
                 'QR generation failed:',
                 error
@@ -3193,44 +2830,33 @@ client.on(
             io.emit(
                 'status',
                 {
-
                     type:
                         'error',
-
                     message:
                         'Failed to generate QR code.'
-
                 }
             );
-
         }
     }
 );
 
 client.on(
     'loading_screen',
-
     percent => {
-
         io.emit(
             'status',
             {
-
                 type:
                     'info',
-
                 message:
                     `WhatsApp loading: ${percent}%`
-
             }
         );
-
     }
 );
 
 client.on(
     'authenticated',
-
     () => {
 
         console.log(
@@ -3243,22 +2869,17 @@ client.on(
         io.emit(
             'status',
             {
-
                 type:
                     'info',
-
                 message:
                     'WhatsApp authenticated. Loading...'
-
             }
         );
-
     }
 );
 
 client.on(
     'auth_failure',
-
     error => {
 
         whatsappReady =
@@ -3277,22 +2898,17 @@ client.on(
         io.emit(
             'status',
             {
-
                 type:
                     'error',
-
                 message:
                     'WhatsApp authentication failed.'
-
             }
         );
-
     }
 );
 
 client.on(
     'ready',
-
     async () => {
 
         whatsappReady =
@@ -3310,28 +2926,22 @@ client.on(
         io.emit(
             'ready',
             {
-
                 message:
                     'WhatsApp is connected.'
-
             }
         );
 
         io.emit(
             'status',
             {
-
                 type:
                     'success',
-
                 message:
                     'WhatsApp is connected.'
-
             }
         );
 
         try {
-
             await Promise.all(
                 Array.from(
                     io.sockets.sockets.values()
@@ -3346,20 +2956,16 @@ client.on(
         } catch (
             error
         ) {
-
             console.error(
                 'Initial group list error:',
                 error.message
             );
-
         }
-
     }
 );
 
 client.on(
     'disconnected',
-
     reason => {
 
         whatsappReady =
@@ -3377,7 +2983,6 @@ client.on(
 
         io.emit(
             'whatsappDisconnected',
-
             String(
                 reason ||
                     'Disconnected'
@@ -3387,22 +2992,17 @@ client.on(
         io.emit(
             'status',
             {
-
                 type:
                     'error',
-
                 message:
                     'WhatsApp disconnected.'
-
             }
         );
-
     }
 );
 
 client.on(
     'change_state',
-
     state => {
 
         console.log(
@@ -3412,12 +3012,8 @@ client.on(
 
         io.emit(
             'whatsappState',
-
-            String(
-                state
-            )
+            String(state)
         );
-
     }
 );
 
@@ -3426,7 +3022,6 @@ client.on(
 // =====================================================
 
 function clearGroupMemberCache() {
-
     groupMemberCache.clear();
 
     groupMemberRefreshes.clear();
@@ -3456,9 +3051,7 @@ setInterval(
         );
 
     },
-
     60 * 1000
-
 ).unref();
 
 // =====================================================
@@ -3467,27 +3060,21 @@ setInterval(
 
 process.on(
     'unhandledRejection',
-
     error => {
-
         console.error(
             'Unhandled Promise Rejection:',
             error
         );
-
     }
 );
 
 process.on(
     'uncaughtException',
-
     error => {
-
         console.error(
             'Uncaught Exception:',
             error
         );
-
     }
 );
 
@@ -3501,7 +3088,6 @@ async function start() {
 
     server.listen(
         PORT,
-
         () => {
 
             console.log(
@@ -3517,7 +3103,6 @@ async function start() {
                 'Whitelist API:',
                 '/api/admin/whitelist'
             );
-
         }
     );
 
@@ -3541,13 +3126,10 @@ async function start() {
         io.emit(
             'status',
             {
-
                 type:
                     'error',
-
                 message:
                     'WhatsApp initialization failed.'
-
             }
         );
     }

@@ -1,3 +1,6 @@
+// FILE: server.js
+// Source basis: :contentReference[oaicite:1]{index=1}
+
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -7,7 +10,6 @@ const net = require('net');
 const { Server } = require('socket.io');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
-const mysql = require('mysql2/promise');
 
 const app = express();
 const server = http.createServer(app);
@@ -33,14 +35,6 @@ const API_RATE_LIMIT = Number(
 
 const API_RATE_WINDOW_MS = Number(
     process.env.API_RATE_WINDOW_MS || 60 * 1000
-);
-
-const ADMIN_RATE_LIMIT = Number(
-    process.env.ADMIN_RATE_LIMIT || 20
-);
-
-const ADMIN_RATE_WINDOW_MS = Number(
-    process.env.ADMIN_RATE_WINDOW_MS || 60 * 1000
 );
 
 const PAYLOAD_TTL_MS = Number(
@@ -82,15 +76,6 @@ if (
     );
 }
 
-if (
-    !process.env.WHITELIST_ADMIN_KEY ||
-    String(process.env.WHITELIST_ADMIN_KEY).length < 32
-) {
-    throw new Error(
-        'WHITELIST_ADMIN_KEY is required and must be at least 32 characters.'
-    );
-}
-
 /*
  * IMPORTANT:
  *
@@ -98,8 +83,6 @@ if (
  *
  * The calling website should generate the encrypted payload from its
  * own backend/server using the same secret.
- *
- * WHITELIST_ADMIN_KEY is only for whitelist administration.
  */
 
 app.disable('x-powered-by');
@@ -165,7 +148,6 @@ app.get('/', (req, res) => {
 // STATE
 // =====================================================
 
-let db = null;
 let whatsappReady = false;
 let latestQr = null;
 
@@ -173,275 +155,8 @@ const groupMemberCache = new Map();
 const groupMemberRefreshes = new Map();
 
 const rateLimitBuckets = new Map();
-const adminRateLimitBuckets = new Map();
 
 const usedPayloadNonces = new Map();
-const usedAdminNonces = new Map();
-
-// =====================================================
-// DATABASE
-// =====================================================
-
-function createDatabasePool() {
-    const connectionUrl =
-        process.env.MYSQL_URL ||
-        process.env.DATABASE_URL;
-
-    if (connectionUrl) {
-        const url = new URL(connectionUrl);
-
-        return mysql.createPool({
-            host: url.hostname,
-            port: Number(
-                url.port || 3306
-            ),
-            user: decodeURIComponent(
-                url.username
-            ),
-            password: decodeURIComponent(
-                url.password
-            ),
-            database: decodeURIComponent(
-                url.pathname.replace(
-                    /^\/+/,
-                    ''
-                )
-            ),
-            charset: 'utf8mb4',
-            waitForConnections: true,
-            connectionLimit: 10,
-            queueLimit: 0
-        });
-    }
-
-    return mysql.createPool({
-        host:
-            process.env.MYSQLHOST ||
-            process.env.DB_HOST,
-
-        port: Number(
-            process.env.MYSQLPORT ||
-            process.env.DB_PORT ||
-            3306
-        ),
-
-        user:
-            process.env.MYSQLUSER ||
-            process.env.DB_USER,
-
-        password:
-            process.env.MYSQLPASSWORD ||
-            process.env.DB_PASSWORD,
-
-        database:
-            process.env.MYSQLDATABASE ||
-            process.env.DB_NAME,
-
-        charset: 'utf8mb4',
-        waitForConnections: true,
-        connectionLimit: 10,
-        queueLimit: 0
-    });
-}
-
-async function initDatabase() {
-    try {
-        db = createDatabasePool();
-
-        await db.query('SELECT 1');
-
-        console.log(
-            'MySQL connected.'
-        );
-
-        /*
-         * Remove obsolete tables that are no longer used.
-         */
-        await db.query(`
-            DROP TABLE IF EXISTS
-                auto_replies,
-                auto_replies_v2,
-                sessions
-        `);
-
-        /*
-         * API whitelist.
-         *
-         * ONLY the domain is stored and checked.
-         * The whitelist table intentionally contains no IP,
-         * label, enabled, or other unused columns.
-         *
-         * Older api_whitelist versions are migrated so existing
-         * domains are preserved and duplicate domains are merged.
-         */
-        await ensureDomainOnlyWhitelistTable();
-
-        console.log(
-            'Database ready.'
-        );
-
-    } catch (error) {
-        console.error(
-            'MySQL connection failed:',
-            error.message
-        );
-
-        db = null;
-    }
-}
-
-async function ensureDomainOnlyWhitelistTable() {
-    const pool =
-        await requireDatabaseWithoutCheck();
-
-    const [tableRows] =
-        await pool.execute(
-            `
-            SELECT COUNT(*) AS table_exists
-            FROM information_schema.tables
-            WHERE table_schema = DATABASE()
-              AND table_name = 'api_whitelist'
-            `
-        );
-
-    const tableExists =
-        Number(
-            tableRows[0]?.table_exists || 0
-        ) > 0;
-
-    const createTable =
-        async tableName => {
-            await pool.query(`
-                CREATE TABLE ${tableName} (
-                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-                    domain_name VARCHAR(253) NOT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (id),
-                    UNIQUE KEY unique_domain_name (domain_name)
-                )
-                ENGINE=InnoDB
-                DEFAULT CHARSET=utf8mb4
-                COLLATE=utf8mb4_unicode_ci
-            `);
-        };
-
-    if (!tableExists) {
-        await createTable(
-            'api_whitelist'
-        );
-
-        return;
-    }
-
-    const [columns] =
-        await pool.query(
-            'SHOW COLUMNS FROM api_whitelist'
-        );
-
-    const columnNames =
-        new Set(
-            columns.map(
-                column =>
-                    String(
-                        column.Field
-                    )
-            )
-        );
-
-    const [indexes] =
-        await pool.query(
-            'SHOW INDEX FROM api_whitelist'
-        );
-
-    const hasUniqueDomain =
-        indexes.some(
-            index =>
-                Number(
-                    index.Non_unique
-                ) === 0 &&
-                String(
-                    index.Column_name
-                ) ===
-                    'domain_name'
-        );
-
-    const hasOnlyRequiredColumns =
-        columnNames.size === 3 &&
-        columnNames.has('id') &&
-        columnNames.has('domain_name') &&
-        columnNames.has('created_at');
-
-    if (
-        hasOnlyRequiredColumns &&
-        hasUniqueDomain
-    ) {
-        return;
-    }
-
-    const migrationTable =
-        'api_whitelist_domain_only_migration';
-
-    await pool.query(
-        `DROP TABLE IF EXISTS ${migrationTable}`
-    );
-
-    await createTable(
-        migrationTable
-    );
-
-    if (
-        columnNames.has('domain_name')
-    ) {
-        const createdAtExpression =
-            columnNames.has(
-                'created_at'
-            )
-                ? 'MIN(created_at)'
-                : 'CURRENT_TIMESTAMP';
-
-        await pool.query(`
-            INSERT IGNORE INTO ${migrationTable} (
-                domain_name,
-                created_at
-            )
-            SELECT
-                LOWER(TRIM(domain_name)) AS domain_name,
-                ${createdAtExpression} AS created_at
-            FROM api_whitelist
-            WHERE domain_name IS NOT NULL
-              AND TRIM(domain_name) <> ''
-            GROUP BY LOWER(TRIM(domain_name))
-        `);
-    }
-
-    await pool.query(
-        'DROP TABLE api_whitelist'
-    );
-
-    await pool.query(
-        `RENAME TABLE ${migrationTable} TO api_whitelist`
-    );
-}
-
-async function requireDatabaseWithoutCheck() {
-    if (!db) {
-        throw new Error(
-            'Database is unavailable.'
-        );
-    }
-
-    return db;
-}
-
-async function requireDatabase() {
-    if (!db) {
-        throw new Error(
-            'Database is unavailable.'
-        );
-    }
-
-    return db;
-}
 
 // =====================================================
 // IP / DOMAIN
@@ -565,134 +280,60 @@ function getClientIp(req) {
 }
 
 // =====================================================
-// WHITELIST DB
+// DOMAIN WHITELIST (ENVIRONMENT VARIABLE)
 // =====================================================
 
-async function isWhitelistedDomain(
-    domain
-) {
-    const pool =
-        await requireDatabase();
+function parseDomainWhitelist(value) {
+    const rawDomains =
+        String(value || '')
+            .split(',')
+            .map(domain => domain.trim())
+            .filter(Boolean);
 
-    const normalizedDomain =
-        normalizeDomain(
-            domain
-        );
+    const domains = new Set();
 
-    const [rows] =
-        await pool.execute(
-            `
-            SELECT id
-            FROM api_whitelist
-            WHERE domain_name = ?
-            LIMIT 1
-            `,
-            [
-                normalizedDomain
-            ]
-        );
-
-    return rows.length > 0;
-}
-
-async function listWhitelist() {
-    const pool =
-        await requireDatabase();
-
-    const [rows] =
-        await pool.execute(`
-            SELECT
-                id,
-                domain_name AS domain,
-                created_at
-            FROM api_whitelist
-            ORDER BY id ASC
-        `);
-
-    return {
-        entries:
-            rows.map(
-                row => ({
-                    id:
-                        Number(
-                            row.id
-                        ),
-
-                    domain:
-                        String(
-                            row.domain
-                        ),
-
-                    createdAt:
-                        row.created_at
-                })
-            )
-    };
-}
-
-async function addWhitelistDomain(
-    domain
-) {
-    const pool =
-        await requireDatabase();
-
-    const normalizedDomain =
-        normalizeDomain(
-            domain
-        );
-
-    await pool.execute(
-        `
-        INSERT INTO api_whitelist (
-            domain_name
-        )
-        VALUES (?)
-        ON DUPLICATE KEY UPDATE
-            domain_name = VALUES(domain_name)
-        `,
-        [
-            normalizedDomain
-        ]
-    );
-
-    return normalizedDomain;
-}
-
-async function removeWhitelistDomain(
-    id
-) {
-    const pool =
-        await requireDatabase();
-
-    const numericId =
-        Number(
-            id
-        );
-
-    if (
-        !Number.isSafeInteger(
-            numericId
-        ) ||
-        numericId < 1
-    ) {
-        throw new Error(
-            'Invalid whitelist entry ID.'
-        );
+    for (const rawDomain of rawDomains) {
+        try {
+            domains.add(
+                normalizeDomain(
+                    rawDomain
+                )
+            );
+        } catch (error) {
+            throw new Error(
+                `Invalid API_DOMAIN_WHITELIST entry "${rawDomain}": ${error.message}`
+            );
+        }
     }
 
-    const [result] =
-        await pool.execute(
-            `
-            DELETE FROM api_whitelist
-            WHERE id = ?
-            `,
-            [
-                numericId
-            ]
+    return domains;
+}
+
+const API_DOMAIN_WHITELIST =
+    parseDomainWhitelist(
+        process.env.API_DOMAIN_WHITELIST
+    );
+
+if (!API_DOMAIN_WHITELIST.size) {
+    throw new Error(
+        'API_DOMAIN_WHITELIST is required and must contain at least one domain.'
+    );
+}
+
+console.log(
+    'API domain whitelist loaded:',
+    API_DOMAIN_WHITELIST.size,
+    'domain(s)'
+);
+
+function isWhitelistedDomain(domain) {
+    const normalizedDomain =
+        normalizeDomain(
+            domain
         );
 
-    return Number(
-        result.affectedRows || 0
+    return API_DOMAIN_WHITELIST.has(
+        normalizedDomain
     );
 }
 
@@ -1367,98 +1008,6 @@ function validateMembershipPayload(
         clientIp,
 
         domain
-    };
-}
-
-function validateAdminPayload(
-    payload
-) {
-    assertAllowedKeys(
-        payload,
-        new Set([
-            'version',
-            'timestamp',
-            'nonce',
-            'action',
-            'id',
-            'domain'
-        ])
-    );
-
-    if (
-        Number(
-            payload.version
-        ) !== 1
-    ) {
-        throw new Error(
-            'Unsupported payload version.'
-        );
-    }
-
-    validateTimestamp(
-        payload.timestamp
-    );
-
-    consumeNonce(
-        usedAdminNonces,
-        payload.nonce
-    );
-
-    const action =
-        String(
-            payload.action ||
-                ''
-        );
-
-    const allowedActions =
-        new Set([
-            'list',
-            'add-domain',
-            'remove-domain'
-        ]);
-
-    if (
-        !allowedActions.has(
-            action
-        )
-    ) {
-        throw new Error(
-            'Invalid admin action.'
-        );
-    }
-
-    return {
-        action,
-
-        id:
-            payload.id == null
-                ? null
-                : (() => {
-                      const numericId =
-                          Number(
-                              payload.id
-                          );
-
-                      if (
-                          !Number.isSafeInteger(
-                              numericId
-                          ) ||
-                          numericId < 1
-                      ) {
-                          throw new Error(
-                              'Invalid whitelist entry ID.'
-                          );
-                      }
-
-                      return numericId;
-                  })(),
-
-        domain:
-            payload.domain == null
-                ? null
-                : normalizeDomain(
-                      payload.domain
-                  )
     };
 }
 
@@ -2191,7 +1740,7 @@ async function requireEncryptedMembershipRequest(
          * authorization.
          */
         const domainWhitelisted =
-            await isWhitelistedDomain(
+            isWhitelistedDomain(
                 data.domain
             );
 
@@ -2261,7 +1810,7 @@ async function requireEncryptedMembershipRequest(
          * Store the validated encrypted payload.
          *
          * The encrypted domain has already been checked
-         * against api_whitelist above.
+         * against the API_DOMAIN_WHITELIST environment variable above.
          */
         req.encryptedPayload =
             data;
@@ -2367,240 +1916,6 @@ app.post(
                         false,
                     error:
                         'Membership check failed.'
-                });
-        }
-    }
-);
-
-// =====================================================
-// ADMIN ENCRYPTED API
-// =====================================================
-
-function requireAdminEncryptedRequest(
-    req,
-    res,
-    next
-) {
-    const sourceIp =
-        getClientIp(req);
-
-    const rate =
-        consumeRateLimit(
-            adminRateLimitBuckets,
-            `admin:${sourceIp}`,
-            ADMIN_RATE_LIMIT,
-            ADMIN_RATE_WINDOW_MS
-        );
-
-    cleanupRateLimitMap(
-        adminRateLimitBuckets
-    );
-
-    if (
-        !rate.allowed
-    ) {
-        res.setHeader(
-            'Retry-After',
-            String(
-                rate.retryAfterSeconds
-            )
-        );
-
-        return res
-            .status(429)
-            .json({
-                success:
-                    false,
-                error:
-                    'Too many administration requests.'
-            });
-    }
-
-    if (
-        !req.body ||
-        typeof req.body !==
-            'object' ||
-        Array.isArray(
-            req.body
-        ) ||
-        typeof req.body
-            .payload !==
-            'string' ||
-        Object.keys(
-            req.body
-        ).length !== 1
-    ) {
-        return res
-            .status(400)
-            .json({
-                success:
-                    false,
-                error:
-                    'Only encrypted payload is accepted.'
-            });
-    }
-
-    try {
-        const decrypted =
-            decryptObject(
-                req.body.payload,
-                process.env
-                    .WHITELIST_ADMIN_KEY
-            );
-
-        req.adminPayload =
-            validateAdminPayload(
-                decrypted
-            );
-
-        return next();
-
-    } catch (error) {
-        console.error(
-            'Admin encrypted request failed:',
-            error.message
-        );
-
-        if (
-            error.message ===
-            'Replay detected.'
-        ) {
-            return res
-                .status(409)
-                .json({
-                    success:
-                        false,
-                    error:
-                        'Replay detected.'
-                });
-        }
-
-        return res
-            .status(401)
-            .json({
-                success:
-                    false,
-                error:
-                    'Invalid or expired admin request.'
-            });
-    }
-}
-
-// =====================================================
-// WHITELIST ADMIN API
-// =====================================================
-
-app.post(
-    '/api/admin/whitelist',
-    requireAdminEncryptedRequest,
-    async (
-        req,
-        res
-    ) => {
-        try {
-            const payload =
-                req.adminPayload;
-
-            switch (
-                payload.action
-            ) {
-
-                case 'list':
-                    return res
-                        .status(200)
-                        .json({
-                            success:
-                                true,
-                            whitelist:
-                                await listWhitelist()
-                        });
-
-                case 'add-domain':
-
-                    if (
-                        !payload.domain
-                    ) {
-                        return res
-                            .status(400)
-                            .json({
-                                success:
-                                    false,
-                                error:
-                                    'Domain is required.'
-                            });
-                    }
-
-                    await addWhitelistDomain(
-                        payload.domain
-                    );
-
-                    console.log(
-                        'WHITELIST DOMAIN ADDED:',
-                        payload.domain
-                    );
-
-                    return res
-                        .status(200)
-                        .json({
-                            success:
-                                true,
-                            whitelist:
-                                await listWhitelist()
-                        });
-
-                case 'remove-domain':
-
-                    if (
-                        !payload.id
-                    ) {
-                        return res
-                            .status(400)
-                            .json({
-                                success:
-                                    false,
-                                error:
-                                    'Whitelist entry ID is required.'
-                            });
-                    }
-
-                    await removeWhitelistDomain(
-                        payload.id
-                    );
-
-                    return res
-                        .status(200)
-                        .json({
-                            success:
-                                true,
-                            whitelist:
-                                await listWhitelist()
-                        });
-
-                default:
-
-                    return res
-                        .status(400)
-                        .json({
-                            success:
-                                false,
-                            error:
-                                'Invalid admin action.'
-                        });
-            }
-
-        } catch (error) {
-            console.error(
-                'Whitelist admin error:',
-                error.message
-            );
-
-            return res
-                .status(500)
-                .json({
-                    success:
-                        false,
-                    error:
-                        'Whitelist administration failed.'
                 });
         }
     }
@@ -3038,16 +2353,8 @@ setInterval(
             usedPayloadNonces
         );
 
-        cleanupNonceMap(
-            usedAdminNonces
-        );
-
         cleanupRateLimitMap(
             rateLimitBuckets
-        );
-
-        cleanupRateLimitMap(
-            adminRateLimitBuckets
         );
 
     },
@@ -3083,9 +2390,6 @@ process.on(
 // =====================================================
 
 async function start() {
-
-    await initDatabase();
-
     server.listen(
         PORT,
         () => {
@@ -3099,10 +2403,6 @@ async function start() {
                 '/api/check-group-membership'
             );
 
-            console.log(
-                'Whitelist API:',
-                '/api/admin/whitelist'
-            );
         }
     );
 

@@ -4,7 +4,7 @@
   "description": "WhatsApp group-only tools with encrypted POST membership API and IP/domain whitelist",
   "main": "server.js",
   "scripts": {
-    "start": "node temp.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.2",

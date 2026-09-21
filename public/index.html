@@ -325,6 +325,7 @@
 
         <!-- ================================================= -->
         <!-- API WHITELIST -->
+        <!-- ================================================= -->
 
         <section
             class="mt-6 rounded-2xl border border-slate-200 bg-white shadow-sm"
@@ -337,7 +338,7 @@
                 </h2>
 
                 <p class="mt-1 text-xs text-slate-400">
-                    Each row links one exact website domain to the public IP of the backend server that sends the API request.
+                    Add exact domain names allowed to use the encrypted API.
                 </p>
 
             </div>
@@ -346,31 +347,19 @@
 
                 <div class="rounded-xl border border-slate-200 p-4">
 
-                    <div class="flex items-start justify-between gap-3">
+                    <div>
 
-                        <div>
+                        <h3 class="font-semibold text-slate-700">
+                            Allowed Domain Name
+                        </h3>
 
-                            <h3 class="font-semibold text-slate-700">
-                                Add Whitelist Entry
-                            </h3>
-
-                            <p class="mt-1 text-xs leading-5 text-slate-400">
-                                The domain and API server IP are stored together in the same whitelist row.
-                            </p>
-
-                        </div>
-
-                        <button
-                            id="get-current-ip"
-                            type="button"
-                            class="shrink-0 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200"
-                        >
-                            Browser IP
-                        </button>
+                        <p class="mt-1 text-xs leading-5 text-slate-400">
+                            Enter the exact hostname that your PHP/API backend sends inside the encrypted payload.
+                        </p>
 
                     </div>
 
-                    <div class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+                    <div class="mt-4">
 
                         <input
                             id="whitelist-domain"
@@ -382,39 +371,14 @@
                             class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-sm outline-none transition focus:border-slate-400 focus:bg-white"
                         >
 
-                        <input
-                            id="whitelist-ip"
-                            type="text"
-                            autocomplete="off"
-                            spellcheck="false"
-                            maxlength="45"
-                            placeholder="203.0.113.10"
-                            class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-sm outline-none transition focus:border-slate-400 focus:bg-white"
-                        >
-
-                        <input
-                            id="whitelist-entry-label"
-                            type="text"
-                            autocomplete="off"
-                            maxlength="100"
-                            placeholder="My API server"
-                            class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400 focus:bg-white"
-                        >
-
-                    </div>
-
-                    <div class="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-3">
-                        <p class="text-xs text-slate-400">Exact hostname only, e.g. example.com</p>
-                        <p class="text-xs text-slate-400">Public IP of the backend server sending the API request.</p>
-                        <p class="text-xs text-slate-400">Optional label for this domain + IP pair.</p>
                     </div>
 
                     <button
-                        id="add-whitelist-entry"
+                        id="add-whitelist-domain"
                         type="button"
-                        class="mt-4 w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700"
+                        class="mt-3 w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700"
                     >
-                        Add Domain + IP
+                        Add Domain
                     </button>
 
                 </div>
@@ -422,12 +386,12 @@
                 <div>
 
                     <div class="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                        Whitelisted Domain + API IP Pairs
+                        Whitelisted Domains
                     </div>
 
                     <div
-                        id="whitelist-list"
-                        class="overflow-hidden rounded-xl border border-slate-200"
+                        id="domain-whitelist-list"
+                        class="space-y-2"
                     ></div>
 
                 </div>
@@ -447,7 +411,7 @@
 
                     <p class="mt-1 text-xs leading-5 text-yellow-800">
                         Enter the admin key only when managing the whitelist.
-                        The key is not stored in localStorage or sent as a normal header.
+                        The key is not stored in localStorage.
                     </p>
 
                     <div class="mt-3 flex flex-col gap-3 sm:flex-row">
@@ -482,6 +446,7 @@
 
         </section>
 
+        <!-- ================================================= -->
         <!-- API INFORMATION -->
         <!-- ================================================= -->
 
@@ -496,7 +461,7 @@
                 </h2>
 
                 <p class="mt-1 text-xs text-slate-400">
-                    External websites must call the encrypted API from a backend IP that is paired with the request domain in the whitelist.
+                    External websites must call the encrypted API with a domain that is present in the whitelist.
                 </p>
 
             </div>
@@ -596,13 +561,13 @@
                         </p>
 
                         <p class="mt-2">
-                            The actual HTTP source IP of the backend must be paired with the encrypted domain in the same whitelist row.
+                            The actual HTTP source IP is not used for whitelist authorization.
                         </p>
 
                         <p class="mt-2">
                             The encrypted
                             <code>domain</code>
-                            must match that same whitelist row.
+                            must be present in the domain whitelist.
                         </p>
 
                     </div>
@@ -716,34 +681,19 @@
                 'load-whitelist'
             );
 
-        const getCurrentIpButton =
-            document.getElementById(
-                'get-current-ip'
-            );
-
         const whitelistDomainInput =
             document.getElementById(
                 'whitelist-domain'
             );
 
-        const whitelistIpInput =
+        const addWhitelistDomainButton =
             document.getElementById(
-                'whitelist-ip'
+                'add-whitelist-domain'
             );
 
-        const whitelistEntryLabelInput =
+        const domainWhitelistList =
             document.getElementById(
-                'whitelist-entry-label'
-            );
-
-        const addWhitelistEntryButton =
-            document.getElementById(
-                'add-whitelist-entry'
-            );
-
-        const whitelistList =
-            document.getElementById(
-                'whitelist-list'
+                'domain-whitelist-list'
             );
 
         const whitelistStatus =
@@ -2058,7 +2008,7 @@
             whitelist
         ) {
 
-            whitelistList.innerHTML =
+            domainWhitelistList.innerHTML =
                 '';
 
             const entries =
@@ -2078,45 +2028,18 @@
                     );
 
                 empty.className =
-                    'p-4 text-xs text-slate-400';
+                    'rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-400';
 
                 empty.textContent =
-                    'No whitelist entries yet.';
+                    'No whitelisted domains yet.';
 
-                whitelistList.appendChild(
+                domainWhitelistList.appendChild(
                     empty
                 );
 
                 return;
+
             }
-
-            const header =
-                document.createElement(
-                    'div'
-                );
-
-            header.className =
-                'hidden grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400 md:grid';
-
-            ['Domain', 'API Server IP', 'Label', ''].forEach(
-                title => {
-                    const cell =
-                        document.createElement(
-                            'div'
-                        );
-
-                    cell.textContent =
-                        title;
-
-                    header.appendChild(
-                        cell
-                    );
-                }
-            );
-
-            whitelistList.appendChild(
-                header
-            );
 
             entries.forEach(
                 item => {
@@ -2127,7 +2050,7 @@
                         );
 
                     row.className =
-                        'grid grid-cols-1 gap-3 border-t border-slate-200 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center';
+                        'flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3';
 
                     const domain =
                         document.createElement(
@@ -2135,122 +2058,13 @@
                         );
 
                     domain.className =
-                        'min-w-0';
+                        'min-w-0 break-all font-mono text-xs font-semibold text-slate-700';
 
-                    const domainTitle =
-                        document.createElement(
-                            'div'
-                        );
-
-                    domainTitle.className =
-                        'mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 md:hidden';
-
-                    domainTitle.textContent =
-                        'Domain';
-
-                    const domainValue =
-                        document.createElement(
-                            'div'
-                        );
-
-                    domainValue.className =
-                        'break-all font-mono text-sm font-semibold text-slate-700';
-
-                    domainValue.textContent =
+                    domain.textContent =
                         String(
                             item?.domain ||
                             ''
                         );
-
-                    domain.appendChild(
-                        domainTitle
-                    );
-
-                    domain.appendChild(
-                        domainValue
-                    );
-
-                    const ip =
-                        document.createElement(
-                            'div'
-                        );
-
-                    ip.className =
-                        'min-w-0';
-
-                    const ipTitle =
-                        document.createElement(
-                            'div'
-                        );
-
-                    ipTitle.className =
-                        'mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 md:hidden';
-
-                    ipTitle.textContent =
-                        'API Server IP';
-
-                    const ipValue =
-                        document.createElement(
-                            'div'
-                        );
-
-                    ipValue.className =
-                        'break-all font-mono text-sm text-slate-700';
-
-                    ipValue.textContent =
-                        String(
-                            item?.ip ||
-                            ''
-                        );
-
-                    ip.appendChild(
-                        ipTitle
-                    );
-
-                    ip.appendChild(
-                        ipValue
-                    );
-
-                    const label =
-                        document.createElement(
-                            'div'
-                        );
-
-                    label.className =
-                        'min-w-0';
-
-                    const labelTitle =
-                        document.createElement(
-                            'div'
-                        );
-
-                    labelTitle.className =
-                        'mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 md:hidden';
-
-                    labelTitle.textContent =
-                        'Label';
-
-                    const labelValue =
-                        document.createElement(
-                            'div'
-                        );
-
-                    labelValue.className =
-                        'break-all text-sm text-slate-500';
-
-                    labelValue.textContent =
-                        String(
-                            item?.label ||
-                            '—'
-                        );
-
-                    label.appendChild(
-                        labelTitle
-                    );
-
-                    label.appendChild(
-                        labelValue
-                    );
 
                     const removeButton =
                         document.createElement(
@@ -2261,7 +2075,7 @@
                         'button';
 
                     removeButton.className =
-                        'w-full rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 md:w-auto';
+                        'shrink-0 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100';
 
                     removeButton.textContent =
                         'Remove';
@@ -2275,18 +2089,34 @@
                                     item?.id
                                 );
 
+                            if (
+                                !Number.isSafeInteger(
+                                    entryId
+                                ) ||
+                                entryId < 1
+                            ) {
+
+                                setWhitelistStatus(
+                                    'Invalid whitelist entry ID.',
+                                    'error'
+                                );
+
+                                return;
+
+                            }
+
                             try {
 
                                 removeButton.disabled =
                                     true;
 
                                 setWhitelistStatus(
-                                    `Removing ${String(item?.domain || '')} + ${String(item?.ip || '')}...`
+                                    `Removing ${String(item?.domain || '')}...`
                                 );
 
                                 const result =
                                     await adminRequest(
-                                        'remove-entry',
+                                        'remove-domain',
                                         {
                                             id:
                                                 entryId
@@ -2324,18 +2154,10 @@
                     );
 
                     row.appendChild(
-                        ip
-                    );
-
-                    row.appendChild(
-                        label
-                    );
-
-                    row.appendChild(
                         removeButton
                     );
 
-                    whitelistList.appendChild(
+                    domainWhitelistList.appendChild(
                         row
                     );
 
@@ -2403,75 +2225,15 @@
         );
 
         // =================================================
-        // CURRENT BROWSER IP
+        // ADD DOMAIN
         // =================================================
 
-        getCurrentIpButton.addEventListener(
-            'click',
-            async () => {
-
-                try {
-
-                    getCurrentIpButton.disabled =
-                        true;
-
-                    getCurrentIpButton.textContent =
-                        'Loading...';
-
-                    const result =
-                        await adminRequest(
-                            'current-ip'
-                        );
-
-                    whitelistIpInput.value =
-                        String(
-                            result?.ip ||
-                            ''
-                        );
-
-                    setWhitelistStatus(
-                        `Browser request IP: ${String(result?.ip || '')}`,
-                        'success'
-                    );
-
-                } catch (
-                    error
-                ) {
-
-                    setWhitelistStatus(
-                        error.message,
-                        'error'
-                    );
-
-                } finally {
-
-                    getCurrentIpButton.disabled =
-                        false;
-
-                    getCurrentIpButton.textContent =
-                        'Browser IP';
-
-                }
-
-            }
-        );
-
-        // =================================================
-        // ADD DOMAIN + IP ENTRY
-        // =================================================
-
-        addWhitelistEntryButton.addEventListener(
+        addWhitelistDomainButton.addEventListener(
             'click',
             async () => {
 
                 const domain =
                     whitelistDomainInput.value.trim();
-
-                const ip =
-                    whitelistIpInput.value.trim();
-
-                const label =
-                    whitelistEntryLabelInput.value.trim();
 
                 if (
                     !domain
@@ -2488,36 +2250,19 @@
 
                 }
 
-                if (
-                    !ip
-                ) {
-
-                    setWhitelistStatus(
-                        'Enter the API server IP address.',
-                        'error'
-                    );
-
-                    whitelistIpInput.focus();
-
-                    return;
-
-                }
-
                 try {
 
-                    addWhitelistEntryButton.disabled =
+                    addWhitelistDomainButton.disabled =
                         true;
 
-                    addWhitelistEntryButton.textContent =
+                    addWhitelistDomainButton.textContent =
                         'Adding...';
 
                     const result =
                         await adminRequest(
-                            'add-entry',
+                            'add-domain',
                             {
-                                domain,
-                                ip,
-                                label
+                                domain
                             }
                         );
 
@@ -2528,14 +2273,8 @@
                     whitelistDomainInput.value =
                         '';
 
-                    whitelistIpInput.value =
-                        '';
-
-                    whitelistEntryLabelInput.value =
-                        '';
-
                     setWhitelistStatus(
-                        `${domain} + ${ip} added to whitelist.`,
+                        `Domain ${domain} added.`,
                         'success'
                     );
 
@@ -2550,27 +2289,33 @@
 
                 } finally {
 
-                    addWhitelistEntryButton.disabled =
+                    addWhitelistDomainButton.disabled =
                         false;
 
-                    addWhitelistEntryButton.textContent =
-                        'Add Domain + IP';
+                    addWhitelistDomainButton.textContent =
+                        'Add Domain';
 
                 }
 
             }
         );
 
-        bindEnter(
-            whitelistDomainInput
-        );
+        whitelistDomainInput.addEventListener(
+            'keydown',
+            event => {
 
-        bindEnter(
-            whitelistIpInput
-        );
+                if (
+                    event.key ===
+                    'Enter'
+                ) {
 
-        bindEnter(
-            whitelistEntryLabelInput
+                    event.preventDefault();
+
+                    addWhitelistDomainButton.click();
+
+                }
+
+            }
         );
 
         // =================================================

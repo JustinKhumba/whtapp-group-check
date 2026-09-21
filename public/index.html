@@ -2,705 +2,1538 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp Group Tools</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="/socket.io/socket.io.js"></script>
-    <style>
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #f1f5f9; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-        .mono {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>WhatsApp Group Manager</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <script src="/socket.io/socket.io.js"></script>
+
+    <style>
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        .group-row {
+            transition:
+                background-color 0.15s ease,
+                transform 0.15s ease;
+        }
+
+        .group-row:hover {
+            transform: translateY(-1px);
         }
     </style>
 </head>
+
 <body class="min-h-screen bg-slate-50 text-slate-800">
-    <header class="border-b border-slate-200 bg-white px-4 py-4 shadow-sm">
-        <div class="mx-auto flex w-full max-w-7xl items-center justify-between gap-4">
+
+    <!-- ================================================= -->
+    <!-- HEADER -->
+    <!-- ================================================= -->
+
+    <header class="border-b border-slate-200 bg-white shadow-sm">
+
+        <div
+            class="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-4"
+        >
+
             <div>
-                <h1 class="text-xl font-bold">WhatsApp Group Tools</h1>
-                <p class="mt-1 text-sm text-slate-500">Group names, group IDs, and membership checking only.</p>
+                <h1 class="text-xl font-bold">
+                    WhatsApp Group Manager
+                </h1>
+
+                <p
+                    id="connection-account"
+                    class="mt-1 text-xs font-medium text-slate-400"
+                >
+                    WhatsApp
+                </p>
             </div>
 
             <button
                 id="refresh-groups"
                 type="button"
-                class="hidden rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                class="hidden rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
             >
                 Refresh Groups
             </button>
+
         </div>
+
     </header>
 
-    <div class="mx-auto w-full max-w-7xl px-4 pt-4">
-        <div id="status-message" class="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-medium text-blue-700 shadow-sm">
+    <!-- ================================================= -->
+    <!-- STATUS -->
+    <!-- ================================================= -->
+
+    <div class="mx-auto w-full max-w-7xl px-4">
+
+        <div
+            id="status-message"
+            class="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-medium text-blue-700 shadow-sm"
+        >
             Connecting to server...
         </div>
+
     </div>
 
-    <section id="qr-container" class="mx-auto mt-4 hidden w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <p class="mb-6 text-center text-sm font-medium text-slate-500">
-            Open WhatsApp on your phone → Settings → Linked Devices → Link a Device
-        </p>
+    <!-- ================================================= -->
+    <!-- QR -->
+    <!-- ================================================= -->
 
-        <div class="flex justify-center">
-            <img
-                id="qr-image"
-                src=""
-                alt="WhatsApp QR Code"
-                class="h-64 w-64 rounded-xl border border-slate-200 shadow-sm"
+    <section
+        id="qr-section"
+        class="mx-auto mt-6 hidden w-full max-w-xl px-4"
+    >
+
+        <div
+            class="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm"
+        >
+
+            <h2
+                class="text-center text-lg font-semibold text-slate-800"
             >
+                Connect WhatsApp
+            </h2>
+
+            <p
+                class="mt-2 text-center text-sm text-slate-500"
+            >
+                Open WhatsApp on your phone and scan this QR code.
+            </p>
+
+            <p
+                class="mt-1 text-center text-xs text-slate-400"
+            >
+                Settings → Linked Devices → Link a Device
+            </p>
+
+            <div class="mt-6 flex justify-center">
+
+                <div
+                    class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                >
+                    <img
+                        id="qr-image"
+                        src=""
+                        alt="WhatsApp QR Code"
+                        class="h-64 w-64 rounded-xl"
+                    >
+                </div>
+
+            </div>
+
         </div>
+
     </section>
 
-    <main id="app-main" class="mx-auto hidden w-full max-w-7xl space-y-4 px-4 pb-10 pt-4">
-        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                    <h2 class="text-lg font-semibold">WhatsApp Groups</h2>
-                    <p class="mt-1 text-sm text-slate-500">
-                        Only group name and group ID are returned. Personal chats and recent messages are not exposed.
-                    </p>
-                </div>
+    <!-- ================================================= -->
+    <!-- MAIN -->
+    <!-- ================================================= -->
 
-                <div class="text-sm text-slate-500">
-                    <span id="group-count">0</span> groups
-                </div>
-            </div>
+    <main
+        id="app-main"
+        class="mx-auto hidden w-full max-w-7xl px-4 pb-10 pt-6"
+    >
 
-            <div class="mt-5 overflow-hidden rounded-xl border border-slate-200">
-                <div class="max-h-[420px] overflow-y-auto">
-                    <table class="min-w-full text-left text-sm">
-                        <thead class="sticky top-0 bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
-                            <tr>
-                                <th class="px-4 py-3">Group Name</th>
-                                <th class="px-4 py-3">Group ID</th>
-                                <th class="px-4 py-3 text-right">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="groups-list"></tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
 
-        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div>
-                <h2 class="text-lg font-semibold">Group Membership Checker</h2>
-                <p class="mt-1 text-sm text-slate-500">
-                    Enter the local phone number without the country code and the WhatsApp group ID.
-                </p>
-            </div>
+            <!-- ========================================= -->
+            <!-- GROUP LIST -->
+            <!-- ========================================= -->
 
-            <div class="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
-                <div>
-                    <label for="check-group-id" class="mb-1 block text-sm font-semibold text-slate-600">
-                        Group ID
-                    </label>
-                    <input
-                        id="check-group-id"
-                        type="text"
-                        autocomplete="off"
-                        spellcheck="false"
-                        class="mono w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-slate-400 focus:bg-white"
-                        placeholder="120363428682544694@g.us"
-                    >
-                    <p class="mt-1 text-xs text-slate-400">Format: digits@g.us</p>
-                </div>
+            <section
+                class="rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-2"
+            >
 
-                <div>
-                    <label for="check-phone-number" class="mb-1 block text-sm font-semibold text-slate-600">
-                        Phone Number
-                    </label>
-                    <input
-                        id="check-phone-number"
-                        type="text"
-                        inputmode="numeric"
-                        autocomplete="off"
-                        class="mono w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-slate-400 focus:bg-white"
-                        placeholder="9876543210"
-                    >
-                    <p id="phone-format-help" class="mt-1 text-xs text-slate-400">
-                        Local number only. No +91 / country code.
-                    </p>
-                </div>
-            </div>
-
-            <div class="mt-5 flex flex-wrap items-center gap-3">
-                <button
-                    id="btn-check-group"
-                    type="button"
-                    class="rounded-lg bg-slate-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                <div
+                    class="flex items-center justify-between border-b border-slate-100 px-5 py-4"
                 >
-                    Check Membership
-                </button>
 
-                <span id="check-meta" class="text-xs text-slate-400"></span>
-            </div>
-
-            <div id="check-result" class="mt-5 hidden rounded-xl border p-5 text-sm"></div>
-        </section>
-
-        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div>
-                <h2 class="text-lg font-semibold">API IP Whitelist</h2>
-                <p class="mt-1 text-sm text-slate-500">
-                    Add or remove IP addresses allowed to call the membership POST API.
-                    Administration requires the server-side <span class="mono">WHITELIST_ADMIN_KEY</span>.
-                </p>
-            </div>
-
-            <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div class="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr_auto_auto]">
                     <div>
-                        <label for="admin-key" class="mb-1 block text-xs font-semibold text-slate-500">
-                            Admin Key
-                        </label>
-                        <input
-                            id="admin-key"
-                            type="password"
-                            autocomplete="off"
-                            class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
-                            placeholder="WHITELIST_ADMIN_KEY"
+
+                        <h2
+                            class="font-semibold text-slate-800"
                         >
+                            WhatsApp Groups
+                        </h2>
+
+                        <p
+                            class="mt-1 text-xs text-slate-400"
+                        >
+                            Only group names and group IDs are shown.
+                        </p>
+
                     </div>
 
+                    <span
+                        id="group-count"
+                        class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500"
+                    >
+                        0
+                    </span>
+
+                </div>
+
+                <div
+                    id="groups-loading"
+                    class="hidden p-8 text-center text-sm text-slate-400"
+                >
+                    Loading groups...
+                </div>
+
+                <div
+                    id="groups-empty"
+                    class="hidden p-8 text-center text-sm text-slate-400"
+                >
+                    No WhatsApp groups found.
+                </div>
+
+                <div
+                    id="groups-list"
+                    class="divide-y divide-slate-100"
+                ></div>
+
+            </section>
+
+            <!-- ========================================= -->
+            <!-- MEMBERSHIP CHECKER -->
+            <!-- ========================================= -->
+
+            <section
+                class="h-fit rounded-2xl border border-slate-200 bg-white shadow-sm"
+            >
+
+                <div
+                    class="border-b border-slate-100 px-5 py-4"
+                >
+
+                    <h2
+                        class="font-semibold text-slate-800"
+                    >
+                        Group Membership Checker
+                    </h2>
+
+                    <p
+                        class="mt-1 text-xs text-slate-400"
+                    >
+                        Check whether a phone number belongs to a group.
+                    </p>
+
+                </div>
+
+                <div class="space-y-5 p-5">
+
+                    <!-- GROUP ID -->
+
                     <div>
-                        <label for="whitelist-ip" class="mb-1 block text-xs font-semibold text-slate-500">
-                            IP Address
+
+                        <label
+                            for="group-id"
+                            class="mb-1.5 block text-sm font-semibold text-slate-600"
+                        >
+                            Group ID
                         </label>
+
                         <input
-                            id="whitelist-ip"
+                            id="group-id"
                             type="text"
                             autocomplete="off"
                             spellcheck="false"
-                            class="mono w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
-                            placeholder="203.0.113.10"
+                            maxlength="60"
+                            placeholder="120363428682544694@g.us"
+                            class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-sm outline-none transition focus:border-slate-400 focus:bg-white"
                         >
+
+                        <p
+                            class="mt-1 text-xs text-slate-400"
+                        >
+                            Must end with <code>@g.us</code>
+                        </p>
+
                     </div>
+
+                    <!-- PHONE -->
 
                     <div>
-                        <label for="whitelist-label" class="mb-1 block text-xs font-semibold text-slate-500">
-                            Label
+
+                        <label
+                            for="phone-number"
+                            class="mb-1.5 block text-sm font-semibold text-slate-600"
+                        >
+                            Phone Number
                         </label>
+
                         <input
-                            id="whitelist-label"
+                            id="phone-number"
                             type="text"
-                            maxlength="100"
+                            inputmode="numeric"
                             autocomplete="off"
-                            class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
-                            placeholder="My website server"
+                            spellcheck="false"
+                            maxlength="25"
+                            placeholder="9876543210"
+                            class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400 focus:bg-white"
                         >
+
+                        <p
+                            class="mt-1 text-xs text-slate-400"
+                        >
+                            Enter local number only. Do not use +91.
+                        </p>
+
                     </div>
 
-                    <div class="flex items-end">
-                        <button
-                            id="add-whitelist"
-                            type="button"
-                            class="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 lg:w-auto"
-                        >
-                            Add / Enable
-                        </button>
+                    <!-- BUTTON -->
+
+                    <button
+                        id="check-membership"
+                        type="button"
+                        disabled
+                        class="w-full rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        Check Membership
+                    </button>
+
+                    <!-- RESULT -->
+
+                    <div
+                        id="membership-result"
+                        class="hidden rounded-xl border p-4 text-sm"
+                    ></div>
+
+                    <!-- CACHE INFO -->
+
+                    <div
+                        id="cache-info"
+                        class="hidden rounded-lg bg-slate-50 p-3 text-xs text-slate-500"
+                    ></div>
+
+                </div>
+
+            </section>
+
+        </div>
+
+        <!-- ============================================= -->
+        <!-- API INFORMATION -->
+        <!-- ============================================= -->
+
+        <section
+            class="mt-6 rounded-2xl border border-slate-200 bg-white shadow-sm"
+        >
+
+            <div class="border-b border-slate-100 px-5 py-4">
+
+                <h2
+                    class="font-semibold text-slate-800"
+                >
+                    External API
+                </h2>
+
+                <p
+                    class="mt-1 text-xs text-slate-400"
+                >
+                    External websites should call the encrypted POST API.
+                </p>
+
+            </div>
+
+            <div class="space-y-4 p-5">
+
+                <div>
+
+                    <div
+                        class="text-xs font-semibold uppercase tracking-wider text-slate-400"
+                    >
+                        Endpoint
                     </div>
+
+                    <code
+                        class="mt-2 block rounded-lg bg-slate-900 p-3 font-mono text-sm text-white"
+                    >/api/check-group-membership</code>
+
                 </div>
 
-                <div class="mt-4 flex flex-wrap items-center gap-3">
-                    <button
-                        id="load-whitelist"
-                        type="button"
-                        class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                <div>
+
+                    <div
+                        class="text-xs font-semibold uppercase tracking-wider text-slate-400"
                     >
-                        Load Whitelist
-                    </button>
+                        Method
+                    </div>
 
-                    <button
-                        id="use-current-ip"
-                        type="button"
-                        class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                    <code
+                        class="mt-2 inline-block rounded-lg bg-slate-100 px-3 py-2 font-mono text-sm text-slate-700"
+                    >POST</code>
+
+                </div>
+
+                <div>
+
+                    <div
+                        class="text-xs font-semibold uppercase tracking-wider text-slate-400"
                     >
-                        Use My Current IP
-                    </button>
+                        Request body
+                    </div>
 
-                    <span id="whitelist-status" class="text-xs text-slate-400"></span>
-                </div>
-            </div>
-
-            <div class="mt-5 overflow-hidden rounded-xl border border-slate-200">
-                <div class="max-h-[320px] overflow-y-auto">
-                    <table class="min-w-full text-left text-sm">
-                        <thead class="sticky top-0 bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
-                            <tr>
-                                <th class="px-4 py-3">IP</th>
-                                <th class="px-4 py-3">Label</th>
-                                <th class="px-4 py-3">Status</th>
-                                <th class="px-4 py-3 text-right">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="whitelist-list"></tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 class="text-lg font-semibold">POST API</h2>
-
-            <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Endpoint</p>
-                <code class="mono mt-2 block break-all text-sm text-slate-800">
-                    POST /api/check-group-membership
-                </code>
-
-                <p class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-400">JSON body</p>
-                <pre class="mono mt-2 overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs text-slate-100">{
-  "phoneNumber": "9876543210",
-  "groupId": "120363428682544694@g.us"
+                    <pre
+                        class="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs leading-6 text-white"
+                    >{
+  "payload": "v1.ENCRYPTED_DATA_HERE"
 }</pre>
 
-                <p class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Example response</p>
-                <pre class="mono mt-2 overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs text-slate-100">{
-  "success": true,
-  "phoneNumber": "9876543210",
-  "groupId": "120363428682544694@g.us",
-  "groupName": "Example Group",
-  "isMember": true,
-  "fromCache": true,
-  "cacheAgeSeconds": 12,
-  "cacheTtlSeconds": 300
-}</pre>
+                </div>
+
+                <p
+                    class="text-xs leading-5 text-slate-500"
+                >
+                    The encryption secret must stay on your website's backend.
+                    Do not put <code>API_ENCRYPTION_SECRET</code> inside this
+                    HTML or any browser JavaScript.
+                </p>
+
             </div>
+
         </section>
+
     </main>
 
+    <!-- ================================================= -->
+    <!-- SCRIPT -->
+    <!-- ================================================= -->
+
     <script>
+
         const socket = io();
 
-        const statusMessage = document.getElementById('status-message');
-        const qrContainer = document.getElementById('qr-container');
-        const qrImage = document.getElementById('qr-image');
-        const appMain = document.getElementById('app-main');
-        const refreshGroupsButton = document.getElementById('refresh-groups');
+        // =================================================
+        // DOM
+        // =================================================
 
-        const groupCount = document.getElementById('group-count');
-        const groupsList = document.getElementById('groups-list');
+        const statusMessage =
+            document.getElementById(
+                'status-message'
+            );
 
-        const checkGroupId = document.getElementById('check-group-id');
-        const checkPhoneNumber = document.getElementById('check-phone-number');
-        const btnCheckGroup = document.getElementById('btn-check-group');
-        const checkResult = document.getElementById('check-result');
-        const checkMeta = document.getElementById('check-meta');
-        const phoneFormatHelp = document.getElementById('phone-format-help');
+        const qrSection =
+            document.getElementById(
+                'qr-section'
+            );
 
-        const adminKey = document.getElementById('admin-key');
-        const whitelistIp = document.getElementById('whitelist-ip');
-        const whitelistLabel = document.getElementById('whitelist-label');
-        const addWhitelistButton = document.getElementById('add-whitelist');
-        const loadWhitelistButton = document.getElementById('load-whitelist');
-        const useCurrentIpButton = document.getElementById('use-current-ip');
-        const whitelistStatus = document.getElementById('whitelist-status');
-        const whitelistList = document.getElementById('whitelist-list');
+        const qrImage =
+            document.getElementById(
+                'qr-image'
+            );
 
-        const ADMIN_KEY_STORAGE = 'whatsapp_group_tools_admin_key';
+        const appMain =
+            document.getElementById(
+                'app-main'
+            );
 
-        adminKey.value = sessionStorage.getItem(ADMIN_KEY_STORAGE) || '';
+        const connectionAccount =
+            document.getElementById(
+                'connection-account'
+            );
 
-        function setStatus(text, type = 'info') {
-            statusMessage.textContent = String(text || '');
+        const refreshGroupsButton =
+            document.getElementById(
+                'refresh-groups'
+            );
 
-            const classes = {
-                success: 'rounded-xl border border-green-200 bg-green-50 p-4 text-sm font-medium text-green-700 shadow-sm',
-                error: 'rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700 shadow-sm',
-                warning: 'rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-sm font-medium text-yellow-700 shadow-sm',
-                info: 'rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-medium text-blue-700 shadow-sm'
-            };
+        const groupsList =
+            document.getElementById(
+                'groups-list'
+            );
 
-            statusMessage.className = classes[type] || classes.info;
+        const groupsLoading =
+            document.getElementById(
+                'groups-loading'
+            );
+
+        const groupsEmpty =
+            document.getElementById(
+                'groups-empty'
+            );
+
+        const groupCount =
+            document.getElementById(
+                'group-count'
+            );
+
+        const groupIdInput =
+            document.getElementById(
+                'group-id'
+            );
+
+        const phoneInput =
+            document.getElementById(
+                'phone-number'
+            );
+
+        const checkButton =
+            document.getElementById(
+                'check-membership'
+            );
+
+        const membershipResult =
+            document.getElementById(
+                'membership-result'
+            );
+
+        const cacheInfo =
+            document.getElementById(
+                'cache-info'
+            );
+
+        // =================================================
+        // STATE
+        // =================================================
+
+        let whatsappConnected =
+            false;
+
+        let groups = [];
+
+        let checkingMembership =
+            false;
+
+        // =================================================
+        // STATUS
+        // =================================================
+
+        function setStatus(
+            message,
+            type = 'info'
+        ) {
+
+            statusMessage.textContent =
+                String(message || '');
+
+            if (
+                type === 'success'
+            ) {
+
+                statusMessage.className =
+                    'mt-4 rounded-xl border border-green-200 bg-green-50 p-4 text-sm font-medium text-green-700 shadow-sm';
+
+            } else if (
+                type === 'error'
+            ) {
+
+                statusMessage.className =
+                    'mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700 shadow-sm';
+
+            } else if (
+                type === 'warning'
+            ) {
+
+                statusMessage.className =
+                    'mt-4 rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-sm font-medium text-yellow-700 shadow-sm';
+
+            } else {
+
+                statusMessage.className =
+                    'mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-medium text-blue-700 shadow-sm';
+            }
         }
 
-        function escapeHtml(value) {
-            const div = document.createElement('div');
-            div.textContent = String(value ?? '');
+        // =================================================
+        // HTML ESCAPE
+        // =================================================
+
+        function escapeHtml(
+            value
+        ) {
+
+            const div =
+                document.createElement(
+                    'div'
+                );
+
+            div.textContent =
+                String(
+                    value ?? ''
+                );
+
             return div.innerHTML;
         }
 
-        function showCheckResult(type, html) {
-            const classes = {
-                success: 'border-green-200 bg-green-50 text-green-800',
-                miss: 'border-yellow-200 bg-yellow-50 text-yellow-800',
-                error: 'border-red-200 bg-red-50 text-red-800',
-                info: 'border-blue-200 bg-blue-50 text-blue-800'
+        // =================================================
+        // CONNECTION
+        // =================================================
+
+        socket.on(
+            'connect',
+            () => {
+
+                setStatus(
+                    'Connected to server. Waiting for WhatsApp...'
+                );
+
+            }
+        );
+
+        socket.on(
+            'disconnect',
+            () => {
+
+                whatsappConnected =
+                    false;
+
+                checkButton.disabled =
+                    true;
+
+                refreshGroupsButton.classList.add(
+                    'hidden'
+                );
+
+                setStatus(
+                    'Disconnected from server.',
+                    'error'
+                );
+
+            }
+        );
+
+        // =================================================
+        // QR
+        // =================================================
+
+        socket.on(
+            'qr',
+            url => {
+
+                qrImage.src =
+                    String(
+                        url || ''
+                    );
+
+                qrSection.classList.remove(
+                    'hidden'
+                );
+
+                appMain.classList.add(
+                    'hidden'
+                );
+
+                refreshGroupsButton.classList.add(
+                    'hidden'
+                );
+
+                whatsappConnected =
+                    false;
+
+                checkButton.disabled =
+                    true;
+
+                setStatus(
+                    'Scan the QR code to connect WhatsApp.',
+                    'warning'
+                );
+
+            }
+        );
+
+        // =================================================
+        // READY
+        // =================================================
+
+        socket.on(
+            'ready',
+            data => {
+
+                whatsappConnected =
+                    true;
+
+                qrSection.classList.add(
+                    'hidden'
+                );
+
+                appMain.classList.remove(
+                    'hidden'
+                );
+
+                refreshGroupsButton.classList.remove(
+                    'hidden'
+                );
+
+                checkButton.disabled =
+                    false;
+
+                if (
+                    data &&
+                    data.accountNumber
+                ) {
+
+                    connectionAccount.textContent =
+                        `CONNECTED AS ${data.accountNumber}`;
+
+                } else {
+
+                    connectionAccount.textContent =
+                        'WHATSAPP CONNECTED';
+                }
+
+                setStatus(
+                    'WhatsApp is connected.',
+                    'success'
+                );
+
+                loadGroups();
+
+            }
+        );
+
+        // =================================================
+        // STATUS FROM SERVER
+        // =================================================
+
+        socket.on(
+            'status',
+            data => {
+
+                if (
+                    typeof data ===
+                    'string'
+                ) {
+
+                    setStatus(
+                        data
+                    );
+
+                    return;
+                }
+
+                const type =
+                    data?.type ||
+                    'info';
+
+                const message =
+                    data?.message ||
+                    '';
+
+                if (
+                    message
+                ) {
+
+                    setStatus(
+                        message,
+                        type
+                    );
+                }
+
+            }
+        );
+
+        // =================================================
+        // GROUP LIST
+        // =================================================
+
+        function loadGroups() {
+
+            if (
+                !whatsappConnected
+            ) {
+                return;
+            }
+
+            groupsLoading.classList.remove(
+                'hidden'
+            );
+
+            groupsEmpty.classList.add(
+                'hidden'
+            );
+
+            groupsList.innerHTML =
+                '';
+
+            refreshGroupsButton.disabled =
+                true;
+
+            socket.emit(
+                'getGroups'
+            );
+
+        }
+
+        socket.on(
+            'groups',
+            data => {
+
+                groups =
+                    Array.isArray(
+                        data
+                    )
+                        ? data
+                        : [];
+
+                refreshGroupsButton.disabled =
+                    false;
+
+                groupsLoading.classList.add(
+                    'hidden'
+                );
+
+                groupCount.textContent =
+                    String(
+                        groups.length
+                    );
+
+                renderGroups(
+                    groups
+                );
+
+            }
+        );
+
+        socket.on(
+            'groupListError',
+            error => {
+
+                refreshGroupsButton.disabled =
+                    false;
+
+                groupsLoading.classList.add(
+                    'hidden'
+                );
+
+                groups =
+                    [];
+
+                groupCount.textContent =
+                    '0';
+
+                groupsList.innerHTML =
+                    '';
+
+                groupsEmpty.classList.remove(
+                    'hidden'
+                );
+
+                groupsEmpty.textContent =
+                    String(
+                        error ||
+                        'Failed to load groups.'
+                    );
+
+                setStatus(
+                    String(
+                        error ||
+                        'Failed to load groups.'
+                    ),
+                    'error'
+                );
+
+            }
+        );
+
+        function renderGroups(
+            groupData
+        ) {
+
+            groupsList.innerHTML =
+                '';
+
+            if (
+                !groupData.length
+            ) {
+
+                groupsEmpty.classList.remove(
+                    'hidden'
+                );
+
+                groupsEmpty.textContent =
+                    'No WhatsApp groups found.';
+
+                return;
+            }
+
+            groupsEmpty.classList.add(
+                'hidden'
+            );
+
+            groupData.forEach(
+                group => {
+
+                    const row =
+                        document.createElement(
+                            'div'
+                        );
+
+                    row.className =
+                        'group-row cursor-pointer border-b border-slate-100 p-4 hover:bg-slate-50';
+
+                    const wrapper =
+                        document.createElement(
+                            'div'
+                        );
+
+                    wrapper.className =
+                        'flex items-start justify-between gap-4';
+
+                    const content =
+                        document.createElement(
+                            'div'
+                        );
+
+                    content.className =
+                        'min-w-0 flex-1';
+
+                    const name =
+                        document.createElement(
+                            'div'
+                        );
+
+                    name.className =
+                        'truncate font-semibold text-slate-800';
+
+                    name.textContent =
+                        String(
+                            group?.name ||
+                            'Unnamed Group'
+                        );
+
+                    const id =
+                        document.createElement(
+                            'div'
+                        );
+
+                    id.className =
+                        'mt-1 break-all font-mono text-xs text-slate-400';
+
+                    id.textContent =
+                        String(
+                            group?.id ||
+                            ''
+                        );
+
+                    content.appendChild(
+                        name
+                    );
+
+                    content.appendChild(
+                        id
+                    );
+
+                    const actions =
+                        document.createElement(
+                            'div'
+                        );
+
+                    actions.className =
+                        'flex shrink-0 gap-2';
+
+                    const useButton =
+                        document.createElement(
+                            'button'
+                        );
+
+                    useButton.type =
+                        'button';
+
+                    useButton.className =
+                        'rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-200';
+
+                    useButton.textContent =
+                        'Use';
+
+                    useButton.addEventListener(
+                        'click',
+                        event => {
+
+                            event.stopPropagation();
+
+                            groupIdInput.value =
+                                String(
+                                    group?.id ||
+                                    ''
+                                );
+
+                            groupIdInput.focus();
+
+                        }
+                    );
+
+                    const copyButton =
+                        document.createElement(
+                            'button'
+                        );
+
+                    copyButton.type =
+                        'button';
+
+                    copyButton.className =
+                        'rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-700';
+
+                    copyButton.textContent =
+                        'Copy';
+
+                    copyButton.addEventListener(
+                        'click',
+                        async event => {
+
+                            event.stopPropagation();
+
+                            const id =
+                                String(
+                                    group?.id ||
+                                    ''
+                                );
+
+                            try {
+
+                                await navigator.clipboard.writeText(
+                                    id
+                                );
+
+                                copyButton.textContent =
+                                    'Copied';
+
+                                setTimeout(
+                                    () => {
+                                        copyButton.textContent =
+                                            'Copy';
+                                    },
+                                    1200
+                                );
+
+                            } catch (_) {
+
+                                setStatus(
+                                    'Could not copy group ID.',
+                                    'error'
+                                );
+
+                            }
+
+                        }
+                    );
+
+                    actions.appendChild(
+                        useButton
+                    );
+
+                    actions.appendChild(
+                        copyButton
+                    );
+
+                    wrapper.appendChild(
+                        content
+                    );
+
+                    wrapper.appendChild(
+                        actions
+                    );
+
+                    row.appendChild(
+                        wrapper
+                    );
+
+                    row.addEventListener(
+                        'click',
+                        () => {
+
+                            groupIdInput.value =
+                                String(
+                                    group?.id ||
+                                    ''
+                                );
+
+                        }
+                    );
+
+                    groupsList.appendChild(
+                        row
+                    );
+
+                }
+            );
+
+        }
+
+        refreshGroupsButton.addEventListener(
+            'click',
+            () => {
+
+                loadGroups();
+
+            }
+        );
+
+        // =================================================
+        // VALIDATION
+        // =================================================
+
+        function isValidGroupId(
+            value
+        ) {
+
+            return /^\d{10,40}@g\.us$/.test(
+                String(
+                    value || ''
+                ).trim()
+            );
+
+        }
+
+        function sanitizePhone(
+            value
+        ) {
+
+            return String(
+                value || ''
+            )
+                .normalize(
+                    'NFKC'
+                )
+                .replace(
+                    /\D/g,
+                    ''
+                )
+                .replace(
+                    /^0+/,
+                    ''
+                );
+
+        }
+
+        function validateInputs() {
+
+            const groupId =
+                groupIdInput.value
+                    .normalize(
+                        'NFKC'
+                    )
+                    .trim();
+
+            const phone =
+                sanitizePhone(
+                    phoneInput.value
+                );
+
+            if (
+                !groupId
+            ) {
+
+                showMembershipResult(
+                    'error',
+                    'Enter a Group ID.'
+                );
+
+                groupIdInput.focus();
+
+                return null;
+            }
+
+            if (
+                !isValidGroupId(
+                    groupId
+                )
+            ) {
+
+                showMembershipResult(
+                    'error',
+                    'Invalid Group ID. It must look like 120363428682544694@g.us.'
+                );
+
+                groupIdInput.focus();
+
+                return null;
+            }
+
+            if (
+                !phone
+            ) {
+
+                showMembershipResult(
+                    'error',
+                    'Enter a phone number.'
+                );
+
+                phoneInput.focus();
+
+                return null;
+            }
+
+            if (
+                phone.length !== 10
+            ) {
+
+                showMembershipResult(
+                    'error',
+                    'Enter exactly 10 local digits without the country code.'
+                );
+
+                phoneInput.focus();
+
+                return null;
+            }
+
+            return {
+                groupId,
+                phoneNumber:
+                    phone
             };
 
-            checkResult.className =
-                `mt-5 rounded-xl border p-5 text-sm ${classes[type] || classes.info}`;
-
-            checkResult.innerHTML = html;
-            checkResult.classList.remove('hidden');
         }
 
-        function saveAdminKey() {
-            const value = adminKey.value.trim();
+        // =================================================
+        // RESULT UI
+        // =================================================
 
-            if (value) {
-                sessionStorage.setItem(ADMIN_KEY_STORAGE, value);
-            } else {
-                sessionStorage.removeItem(ADMIN_KEY_STORAGE);
-            }
+        function showMembershipResult(
+            type,
+            message
+        ) {
 
-            return value;
-        }
-
-        async function adminRequest(path, body = {}) {
-            const key = saveAdminKey();
-
-            if (!key) {
-                throw new Error('Enter the whitelist admin key first.');
-            }
-
-            const response = await fetch(path, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Admin-Key': key
-                },
-                body: JSON.stringify(body)
-            });
-
-            const data = await response.json().catch(() => ({
-                success: false,
-                error: 'Invalid server response.'
-            }));
-
-            if (!response.ok || !data.success) {
-                throw new Error(data.error || `Request failed (${response.status}).`);
-            }
-
-            return data;
-        }
-
-        function renderGroups(groups) {
-            const safeGroups = Array.isArray(groups) ? groups : [];
-
-            groupCount.textContent = String(safeGroups.length);
-            groupsList.innerHTML = '';
-
-            if (!safeGroups.length) {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td colspan="3" class="px-4 py-8 text-center text-sm text-slate-400">
-                        No groups found.
-                    </td>
-                `;
-                groupsList.appendChild(tr);
-                return;
-            }
-
-            for (const group of safeGroups) {
-                const tr = document.createElement('tr');
-                tr.className = 'border-t border-slate-100';
-
-                const tdName = document.createElement('td');
-                tdName.className = 'px-4 py-3 font-semibold text-slate-800';
-                tdName.textContent = group.name || 'Unnamed Group';
-
-                const tdId = document.createElement('td');
-                tdId.className = 'mono px-4 py-3 text-xs text-slate-500';
-                tdId.textContent = group.id || '';
-
-                const tdAction = document.createElement('td');
-                tdAction.className = 'px-4 py-3 text-right';
-
-                const useButton = document.createElement('button');
-                useButton.type = 'button';
-                useButton.className = 'rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100';
-                useButton.textContent = 'Use';
-                useButton.addEventListener('click', () => {
-                    checkGroupId.value = group.id || '';
-                    checkGroupId.focus();
-                    showCheckResult('info', 'Group ID selected. Enter the phone number and check.');
-                });
-
-                tdAction.appendChild(useButton);
-
-                tr.appendChild(tdName);
-                tr.appendChild(tdId);
-                tr.appendChild(tdAction);
-
-                groupsList.appendChild(tr);
-            }
-        }
-
-        function renderWhitelist(items) {
-            const safeItems = Array.isArray(items) ? items : [];
-
-            whitelistList.innerHTML = '';
-
-            if (!safeItems.length) {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td colspan="4" class="px-4 py-8 text-center text-sm text-slate-400">
-                        No whitelisted IP addresses.
-                    </td>
-                `;
-                whitelistList.appendChild(tr);
-                return;
-            }
-
-            for (const item of safeItems) {
-                const tr = document.createElement('tr');
-                tr.className = 'border-t border-slate-100';
-
-                const tdIp = document.createElement('td');
-                tdIp.className = 'mono px-4 py-3 text-xs text-slate-700';
-                tdIp.textContent = item.ip || '';
-
-                const tdLabel = document.createElement('td');
-                tdLabel.className = 'px-4 py-3 text-sm text-slate-600';
-                tdLabel.textContent = item.label || '';
-
-                const tdStatus = document.createElement('td');
-                tdStatus.className = 'px-4 py-3 text-xs font-semibold';
-                tdStatus.textContent = item.enabled ? 'Enabled' : 'Disabled';
-                tdStatus.className += item.enabled
-                    ? ' text-green-600'
-                    : ' text-slate-400';
-
-                const tdAction = document.createElement('td');
-                tdAction.className = 'px-4 py-3 text-right';
-
-                const removeButton = document.createElement('button');
-                removeButton.type = 'button';
-                removeButton.className = 'rounded-lg bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100';
-                removeButton.textContent = 'Remove';
-
-                removeButton.addEventListener('click', async () => {
-                    if (!confirm(`Remove ${item.ip} from the whitelist?`)) {
-                        return;
-                    }
-
-                    try {
-                        removeButton.disabled = true;
-                        const data = await adminRequest('/api/admin/whitelist/remove', {
-                            ip: item.ip
-                        });
-
-                        renderWhitelist(data.items || []);
-                        whitelistStatus.textContent = `Removed ${item.ip}.`;
-                    } catch (error) {
-                        whitelistStatus.textContent = error.message;
-                    } finally {
-                        removeButton.disabled = false;
-                    }
-                });
-
-                tdAction.appendChild(removeButton);
-
-                tr.appendChild(tdIp);
-                tr.appendChild(tdLabel);
-                tr.appendChild(tdStatus);
-                tr.appendChild(tdAction);
-
-                whitelistList.appendChild(tr);
-            }
-        }
-
-        async function loadWhitelist() {
-            try {
-                whitelistStatus.textContent = 'Loading...';
-
-                const data = await adminRequest('/api/admin/whitelist/list');
-                renderWhitelist(data.items || []);
-
-                whitelistStatus.textContent = `Loaded ${data.items?.length || 0} entries.`;
-            } catch (error) {
-                whitelistStatus.textContent = error.message;
-            }
-        }
-
-        socket.on('connect', () => {
-            setStatus('Connected to server. Waiting for WhatsApp...');
-        });
-
-        socket.on('disconnect', () => {
-            setStatus('Disconnected from server.', 'error');
-        });
-
-        socket.on('status', data => {
-            const type = ['success', 'error', 'warning', 'info'].includes(data?.type)
-                ? data.type
-                : 'info';
-
-            setStatus(data?.message || 'Server update.', type);
-        });
-
-        socket.on('qr', url => {
-            qrContainer.classList.remove('hidden');
-            appMain.classList.add('hidden');
-            refreshGroupsButton.classList.add('hidden');
-            qrImage.src = url;
-            setStatus('Scan the QR code to login.', 'warning');
-        });
-
-        socket.on('ready', () => {
-            qrContainer.classList.add('hidden');
-            appMain.classList.remove('hidden');
-            refreshGroupsButton.classList.remove('hidden');
-
-            socket.emit('getGroups');
-        });
-
-        socket.on('groups', groups => {
-            renderGroups(groups);
-        });
-
-        socket.on('groupListError', error => {
-            setStatus(String(error || 'Failed to load groups.'), 'error');
-        });
-
-        socket.on('groupMembershipResult', data => {
-            btnCheckGroup.disabled = false;
-
-            const safeNumber = escapeHtml(data?.phoneNumber || '');
-            const safeName = escapeHtml(data?.groupName || 'Unknown Group');
-            const safeId = escapeHtml(data?.groupId || '');
-
-            const age = Number(data?.cacheAgeSeconds || 0);
-            const ttl = Number(data?.cacheTtlSeconds || 0);
-
-            checkMeta.textContent = data?.fromCache
-                ? `Cached member list: ${age}s old.`
-                : 'Member list refreshed from WhatsApp.';
-
-            if (data?.isMember) {
-                showCheckResult(
-                    'success',
-                    `
-                        <div class="font-bold text-green-700">Member Found</div>
-                        <div class="mt-2">
-                            <code class="mono rounded bg-green-200 px-1.5 py-0.5">${safeNumber}</code>
-                            is a member of <strong>${safeName}</strong>.
-                        </div>
-                        <div class="mono mt-2 text-xs text-green-700">${safeId}</div>
-                    `
-                );
-            } else {
-                showCheckResult(
-                    'miss',
-                    `
-                        <div class="font-bold text-yellow-700">Not a Member</div>
-                        <div class="mt-2">
-                            <code class="mono rounded bg-yellow-200 px-1.5 py-0.5">${safeNumber}</code>
-                            was not found in <strong>${safeName}</strong>.
-                        </div>
-                        <div class="mono mt-2 text-xs text-yellow-700">${safeId}</div>
-                    `
-                );
-            }
-
-            if (ttl > 0) {
-                checkMeta.textContent += ` Next refresh after ${Math.max(0, ttl - age)}s.`;
-            }
-        });
-
-        socket.on('groupMembershipError', error => {
-            btnCheckGroup.disabled = false;
-            checkMeta.textContent = '';
-
-            showCheckResult(
-                'error',
-                `Error: ${escapeHtml(error || 'Failed to check membership.')}`
+            membershipResult.classList.remove(
+                'hidden'
             );
-        });
 
-        socket.on('whatsappDisconnected', reason => {
-            setStatus(`WhatsApp disconnected: ${reason}`, 'error');
-        });
+            if (
+                type === 'success'
+            ) {
 
-        refreshGroupsButton.addEventListener('click', () => {
-            setStatus('Refreshing group list...');
-            socket.emit('getGroups');
-        });
+                membershipResult.className =
+                    'rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800';
 
-        btnCheckGroup.addEventListener('click', () => {
-            const groupId = checkGroupId.value.trim();
-            const phoneNumber = checkPhoneNumber.value.trim();
+            } else if (
+                type === 'not-member'
+            ) {
 
-            if (!groupId || !phoneNumber) {
-                showCheckResult(
-                    'error',
-                    'Please provide both Group ID and Phone Number.'
+                membershipResult.className =
+                    'rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800';
+
+            } else if (
+                type === 'error'
+            ) {
+
+                membershipResult.className =
+                    'rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800';
+
+            } else {
+
+                membershipResult.className =
+                    'rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800';
+
+            }
+
+            membershipResult.textContent =
+                String(
+                    message || ''
                 );
+
+        }
+
+        function showLoadingResult() {
+
+            showMembershipResult(
+                'info',
+                'Checking group membership...'
+            );
+
+            cacheInfo.classList.add(
+                'hidden'
+            );
+
+        }
+
+        // =================================================
+        // MEMBERSHIP CHECK
+        // =================================================
+
+        async function checkMembership() {
+
+            if (
+                checkingMembership
+            ) {
                 return;
             }
 
-            btnCheckGroup.disabled = true;
-            checkMeta.textContent = 'Checking...';
-            showCheckResult('info', 'Checking the cached group member list...');
+            if (
+                !whatsappConnected
+            ) {
 
-            socket.emit('checkGroupMembership', {
-                groupId,
-                phoneNumber
-            });
-        });
+                showMembershipResult(
+                    'error',
+                    'WhatsApp is not connected.'
+                );
 
-        checkPhoneNumber.addEventListener('keydown', event => {
-            if (event.key === 'Enter' && !btnCheckGroup.disabled) {
-                btnCheckGroup.click();
-            }
-        });
-
-        adminKey.addEventListener('input', () => {
-            saveAdminKey();
-        });
-
-        loadWhitelistButton.addEventListener('click', loadWhitelist);
-
-        useCurrentIpButton.addEventListener('click', async () => {
-            try {
-                whitelistStatus.textContent = 'Detecting...';
-
-                const data = await adminRequest('/api/admin/whitelist/current-ip');
-
-                whitelistIp.value = data.ip || '';
-                whitelistStatus.textContent = data.ip
-                    ? `Current IP: ${data.ip}`
-                    : 'Could not detect IP.';
-            } catch (error) {
-                whitelistStatus.textContent = error.message;
-            }
-        });
-
-        addWhitelistButton.addEventListener('click', async () => {
-            const ip = whitelistIp.value.trim();
-            const label = whitelistLabel.value.trim();
-
-            if (!ip) {
-                whitelistStatus.textContent = 'Enter an IP address.';
                 return;
             }
 
-            try {
-                addWhitelistButton.disabled = true;
-                whitelistStatus.textContent = 'Saving...';
+            const values =
+                validateInputs();
 
-                const data = await adminRequest('/api/admin/whitelist/add', {
-                    ip,
-                    label
-                });
-
-                renderWhitelist(data.items || []);
-                whitelistStatus.textContent = `${ip} added/enabled.`;
-            } catch (error) {
-                whitelistStatus.textContent = error.message;
-            } finally {
-                addWhitelistButton.disabled = false;
+            if (
+                !values
+            ) {
+                return;
             }
-        });
 
-        phoneFormatHelp.textContent = 'Local number only. No country code.';
+            checkingMembership =
+                true;
+
+            checkButton.disabled =
+                true;
+
+            checkButton.textContent =
+                'Checking...';
+
+            showLoadingResult();
+
+            socket.emit(
+                'checkGroupMembership',
+                values
+            );
+
+        }
+
+        checkButton.addEventListener(
+            'click',
+            checkMembership
+        );
+
+        // =================================================
+        // MEMBERSHIP RESULT
+        // =================================================
+
+        socket.on(
+            'groupMembershipResult',
+            data => {
+
+                checkingMembership =
+                    false;
+
+                checkButton.disabled =
+                    false;
+
+                checkButton.textContent =
+                    'Check Membership';
+
+                const groupName =
+                    String(
+                        data?.groupName ||
+                        'Unknown Group'
+                    );
+
+                const groupId =
+                    String(
+                        data?.groupId ||
+                        ''
+                    );
+
+                const phone =
+                    String(
+                        data?.phoneNumber ||
+                        ''
+                    );
+
+                if (
+                    data?.isMember
+                ) {
+
+                    showMembershipResult(
+                        'success',
+                        `${phone} IS A MEMBER of "${groupName}".`
+                    );
+
+                } else {
+
+                    showMembershipResult(
+                        'not-member',
+                        `${phone} IS NOT A MEMBER of "${groupName}".`
+                    );
+
+                }
+
+                const age =
+                    Number(
+                        data?.cacheAgeSeconds ||
+                        0
+                    );
+
+                const ttl =
+                    Number(
+                        data?.cacheTtlSeconds ||
+                        0
+                    );
+
+                const remaining =
+                    Math.max(
+                        0,
+                        ttl - age
+                    );
+
+                const source =
+                    data?.fromCache
+                        ? 'Cached member list'
+                        : 'Fresh member list';
+
+                cacheInfo.classList.remove(
+                    'hidden'
+                );
+
+                cacheInfo.innerHTML =
+                    `
+                    <div class="font-semibold text-slate-600">
+                        ${escapeHtml(source)}
+                    </div>
+
+                    <div class="mt-1">
+                        Group:
+                        <span class="font-mono">
+                            ${escapeHtml(groupId)}
+                        </span>
+                    </div>
+
+                    <div class="mt-1">
+                        Cache age:
+                        ${escapeHtml(age)}s
+                    </div>
+
+                    <div class="mt-1">
+                        Refresh in approximately:
+                        ${escapeHtml(remaining)}s
+                    </div>
+                    `;
+
+            }
+        );
+
+        // =================================================
+        // MEMBERSHIP ERROR
+        // =================================================
+
+        socket.on(
+            'groupMembershipError',
+            error => {
+
+                checkingMembership =
+                    false;
+
+                checkButton.disabled =
+                    false;
+
+                checkButton.textContent =
+                    'Check Membership';
+
+                showMembershipResult(
+                    'error',
+                    String(
+                        error ||
+                        'Failed to check membership.'
+                    )
+                );
+
+            }
+        );
+
+        // =================================================
+        // ENTER KEY
+        // =================================================
+
+        groupIdInput.addEventListener(
+            'keydown',
+            event => {
+
+                if (
+                    event.key ===
+                    'Enter' &&
+                    !checkButton.disabled
+                ) {
+
+                    checkMembership();
+
+                }
+
+            }
+        );
+
+        phoneInput.addEventListener(
+            'keydown',
+            event => {
+
+                if (
+                    event.key ===
+                    'Enter' &&
+                    !checkButton.disabled
+                ) {
+
+                    checkMembership();
+
+                }
+
+            }
+        );
+
+        // =================================================
+        // WHATSAPP DISCONNECT
+        // =================================================
+
+        socket.on(
+            'whatsappDisconnected',
+            reason => {
+
+                whatsappConnected =
+                    false;
+
+                checkButton.disabled =
+                    true;
+
+                refreshGroupsButton.classList.add(
+                    'hidden'
+                );
+
+                setStatus(
+                    `WhatsApp disconnected: ${String(reason || 'Disconnected')}`,
+                    'error'
+                );
+
+            }
+        );
+
+        // =================================================
+        // WHATSAPP STATE
+        // =================================================
+
+        socket.on(
+            'whatsappState',
+            state => {
+
+                if (
+                    state
+                ) {
+
+                    connectionAccount.textContent =
+                        `WHATSAPP STATE: ${String(state)}`;
+                }
+
+            }
+        );
+
     </script>
+
 </body>
 </html>

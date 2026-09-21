@@ -1,6 +1,3 @@
-<!-- FILE: index.html -->
-<!-- Source basis: :contentReference[oaicite:0]{index=0} -->
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -50,6 +47,71 @@
 <body class="min-h-screen bg-slate-50 text-slate-800">
 
     <!-- ================================================= -->
+    <!-- ADMIN AUTHENTICATION -->
+    <!-- ================================================= -->
+
+    <div
+        id="auth-gate"
+        class="fixed inset-0 z-50 flex min-h-screen items-center justify-center bg-slate-950/95 p-4"
+    >
+        <div class="w-full max-w-md rounded-2xl border border-slate-800 bg-white p-6 shadow-2xl">
+
+            <div class="mb-6 text-center">
+
+                <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 text-xl font-bold text-white">
+                    WA
+                </div>
+
+                <h1 class="text-xl font-bold text-slate-900">
+                    Admin Authentication
+                </h1>
+
+                <p class="mt-2 text-sm leading-6 text-slate-500">
+                    Enter the
+                    <code>API_ENCRYPTION_SECRET</code>
+                    to access the protected WhatsApp admin panel and QR code.
+                </p>
+
+            </div>
+
+            <label
+                for="admin-key"
+                class="mb-1.5 block text-sm font-semibold text-slate-600"
+            >
+                Admin Key
+            </label>
+
+            <input
+                id="admin-key"
+                type="password"
+                autocomplete="new-password"
+                spellcheck="false"
+                maxlength="512"
+                placeholder="Enter API_ENCRYPTION_SECRET"
+                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 font-mono text-sm outline-none transition focus:border-slate-400 focus:bg-white"
+            >
+
+            <button
+                id="admin-authenticate"
+                type="button"
+                class="mt-4 w-full rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+                Authenticate
+            </button>
+
+            <div
+                id="auth-error"
+                class="mt-4 hidden rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            ></div>
+
+            <p class="mt-4 text-center text-xs text-slate-400">
+                The key is kept only in browser memory and is not stored in localStorage.
+            </p>
+
+        </div>
+    </div>
+
+    <!-- ================================================= -->
     <!-- HEADER -->
     <!-- ================================================= -->
 
@@ -74,13 +136,25 @@
 
             </div>
 
-            <button
-                id="refresh-groups"
-                type="button"
-                class="hidden rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
-            >
-                Refresh Groups
-            </button>
+            <div class="flex items-center gap-2">
+
+                <button
+                    id="lock-admin"
+                    type="button"
+                    class="hidden rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                    Lock
+                </button>
+
+                <button
+                    id="refresh-groups"
+                    type="button"
+                    class="hidden rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+                >
+                    Refresh Groups
+                </button>
+
+            </div>
 
         </div>
 
@@ -96,7 +170,7 @@
             id="status-message"
             class="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-medium text-blue-700 shadow-sm"
         >
-            Connecting to server...
+            Admin authentication required.
         </div>
 
     </div>
@@ -179,7 +253,7 @@
                         </h2>
 
                         <p class="mt-1 text-xs text-slate-400">
-                            Only group names and group IDs are shown.
+                            Admin-only group list.
                         </p>
 
                     </div>
@@ -231,7 +305,8 @@
                     </h2>
 
                     <p class="mt-1 text-xs text-slate-400">
-                        Check whether a phone number belongs to a group.
+                        Admin-only checker over the authenticated Socket.IO session.
+                        External websites must use the encrypted POST API.
                     </p>
 
                 </div>
@@ -339,7 +414,7 @@
                 </h2>
 
                 <p class="mt-1 text-xs text-slate-400">
-                    External websites must call the encrypted API with a domain configured in API_DOMAIN_WHITELIST.
+                    External websites must call the encrypted API from their backend/server.
                 </p>
 
             </div>
@@ -379,13 +454,27 @@
                     <div
                         class="text-xs font-semibold uppercase tracking-wider text-slate-400"
                     >
+                        Required header
+                    </div>
+
+                    <pre
+                        class="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs leading-6 text-white"
+                    >X-API-Domain: example.com</pre>
+
+                </div>
+
+                <div>
+
+                    <div
+                        class="text-xs font-semibold uppercase tracking-wider text-slate-400"
+                    >
                         Request body
                     </div>
 
                     <pre
                         class="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs leading-6 text-white"
                     >{
-  "payload": "v1.ENCRYPTED_DATA_HERE"
+  "payload": "v2.ENCRYPTED_DATA_HERE"
 }</pre>
 
                 </div>
@@ -401,13 +490,11 @@
                     <pre
                         class="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-4 text-xs leading-6 text-white"
                     >{
-  "version": 1,
+  "version": 2,
   "timestamp": 1750000000000,
   "nonce": "RANDOM_BASE64URL_NONCE",
   "phoneNumber": "9876543210",
-  "groupId": "120363428682544694@g.us",
-  "clientIp": "203.0.113.25",
-  "domain": "example.com"
+  "groupId": "120363428682544694@g.us"
 }</pre>
 
                 </div>
@@ -419,33 +506,42 @@
                     <div
                         class="text-xs font-semibold uppercase tracking-wider text-slate-400"
                     >
-                        Important
+                        Security
                     </div>
 
                     <div class="mt-2 text-sm leading-6 text-slate-600">
 
                         <p>
-                            The normal API uses
-                            <code>API_ENCRYPTION_SECRET</code>.
+                            Keep
+                            <code>API_ENCRYPTION_SECRET</code>
+                            only on the external website backend/server.
                         </p>
 
                         <p class="mt-2">
-                            Keep that secret only on the external website backend.
+                            The encrypted payload uses AES-256-GCM.
                         </p>
 
                         <p class="mt-2">
-                            The request body contains only the encrypted
-                            <code>payload</code>.
+                            The normalized
+                            <code>X-API-Domain</code>
+                            header is authenticated as AES-GCM additional authenticated data (AAD).
                         </p>
 
                         <p class="mt-2">
-                            The actual HTTP source IP is not used for whitelist authorization.
+                            The domain is therefore not part of the decrypted JSON payload, but it is cryptographically bound to it.
                         </p>
 
                         <p class="mt-2">
-                            The encrypted
-                            <code>domain</code>
-                            must be present in API_DOMAIN_WHITELIST.
+                            The server accepts only domains configured in
+                            <code>API_DOMAIN_WHITELIST</code>.
+                        </p>
+
+                        <p class="mt-2">
+                            Every request also requires a fresh nonce and a valid timestamp.
+                        </p>
+
+                        <p class="mt-2">
+                            No client-IP field and no application rate-limiting feature are used.
                         </p>
 
                     </div>
@@ -463,12 +559,37 @@
     <!-- ================================================= -->
 
     <script>
+        let socket = null;
+        let adminKey = '';
 
-        const socket = io();
+        let whatsappConnected = false;
+        let groups = [];
+        let checkingMembership = false;
 
-        // =================================================
-        // DOM
-        // =================================================
+        const authGate =
+            document.getElementById(
+                'auth-gate'
+            );
+
+        const adminKeyInput =
+            document.getElementById(
+                'admin-key'
+            );
+
+        const authenticateButton =
+            document.getElementById(
+                'admin-authenticate'
+            );
+
+        const authError =
+            document.getElementById(
+                'auth-error'
+            );
+
+        const lockAdminButton =
+            document.getElementById(
+                'lock-admin'
+            );
 
         const statusMessage =
             document.getElementById(
@@ -546,19 +667,6 @@
             );
 
         // =================================================
-        // STATE
-        // =================================================
-
-        let whatsappConnected =
-            false;
-
-        let groups =
-            [];
-
-        let checkingMembership =
-            false;
-
-        // =================================================
         // STATUS
         // =================================================
 
@@ -566,40 +674,31 @@
             message,
             type = 'info'
         ) {
-
             statusMessage.textContent =
                 String(
                     message || ''
                 );
 
-            if (
-                type === 'success'
-            ) {
-
+            if (type === 'success') {
                 statusMessage.className =
                     'mt-4 rounded-xl border border-green-200 bg-green-50 p-4 text-sm font-medium text-green-700 shadow-sm';
 
             } else if (
                 type === 'error'
             ) {
-
                 statusMessage.className =
                     'mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700 shadow-sm';
 
             } else if (
                 type === 'warning'
             ) {
-
                 statusMessage.className =
                     'mt-4 rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-sm font-medium text-yellow-700 shadow-sm';
 
             } else {
-
                 statusMessage.className =
                     'mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-medium text-blue-700 shadow-sm';
-
             }
-
         }
 
         // =================================================
@@ -609,7 +708,6 @@
         function escapeHtml(
             value
         ) {
-
             const div =
                 document.createElement(
                     'div'
@@ -621,177 +719,600 @@
                 );
 
             return div.innerHTML;
-
         }
 
         // =================================================
-        // SOCKET CONNECTION
+        // ADMIN UI LOCK
         // =================================================
 
-        socket.on(
-            'connect',
-            () => {
+        function showAuthGate(
+            message = ''
+        ) {
+            authGate.classList.remove(
+                'hidden'
+            );
 
-                setStatus(
-                    'Connected to server. Waiting for WhatsApp...'
-                );
+            appMain.classList.add(
+                'hidden'
+            );
 
-            }
-        );
+            qrSection.classList.add(
+                'hidden'
+            );
 
-        socket.on(
-            'disconnect',
-            () => {
+            refreshGroupsButton.classList.add(
+                'hidden'
+            );
 
-                whatsappConnected =
-                    false;
+            lockAdminButton.classList.add(
+                'hidden'
+            );
 
-                checkButton.disabled =
-                    true;
+            checkButton.disabled =
+                true;
 
-                refreshGroupsButton.classList.add(
+            if (message) {
+                authError.textContent =
+                    String(message);
+
+                authError.classList.remove(
                     'hidden'
                 );
+            } else {
+                authError.textContent =
+                    '';
+
+                authError.classList.add(
+                    'hidden'
+                );
+            }
+        }
+
+        function hideAuthGate() {
+            authGate.classList.add(
+                'hidden'
+            );
+
+            authError.textContent =
+                '';
+
+            authError.classList.add(
+                'hidden'
+            );
+
+            lockAdminButton.classList.remove(
+                'hidden'
+            );
+        }
+
+        function lockAdmin() {
+            adminKey = '';
+
+            adminKeyInput.value =
+                '';
+
+            whatsappConnected =
+                false;
+
+            checkingMembership =
+                false;
+
+            checkButton.disabled =
+                true;
+
+            appMain.classList.add(
+                'hidden'
+            );
+
+            qrSection.classList.add(
+                'hidden'
+            );
+
+            refreshGroupsButton.classList.add(
+                'hidden'
+            );
+
+            lockAdminButton.classList.add(
+                'hidden'
+            );
+
+            if (socket) {
+                socket.removeAllListeners();
+                socket.disconnect();
+                socket = null;
+            }
+
+            setStatus(
+                'Admin authentication required.'
+            );
+
+            showAuthGate();
+            adminKeyInput.focus();
+        }
+
+        // =================================================
+        // SOCKET BINDINGS
+        // =================================================
+
+        function bindSocketEvents(
+            currentSocket
+        ) {
+            currentSocket.on(
+                'connect',
+                () => {
+                    setStatus(
+                        'Admin authenticated. Waiting for WhatsApp...'
+                    );
+
+                    hideAuthGate();
+                }
+            );
+
+            currentSocket.on(
+                'connect_error',
+                () => {
+                    whatsappConnected =
+                        false;
+
+                    checkButton.disabled =
+                        true;
+
+                    refreshGroupsButton.classList.add(
+                        'hidden'
+                    );
+
+                    setStatus(
+                        'Admin authentication failed.',
+                        'error'
+                    );
+
+                    showAuthGate(
+                        'Invalid admin key or server rejected the connection.'
+                    );
+                }
+            );
+
+            currentSocket.on(
+                'disconnect',
+                () => {
+                    whatsappConnected =
+                        false;
+
+                    checkButton.disabled =
+                        true;
+
+                    refreshGroupsButton.classList.add(
+                        'hidden'
+                    );
+
+                    setStatus(
+                        'Admin connection disconnected.',
+                        'error'
+                    );
+                }
+            );
+
+            currentSocket.on(
+                'adminAuthenticated',
+                data => {
+                    if (
+                        data?.success === true
+                    ) {
+                        hideAuthGate();
+                    }
+                }
+            );
+
+            currentSocket.on(
+                'qr',
+                url => {
+                    qrImage.src =
+                        String(
+                            url || ''
+                        );
+
+                    qrSection.classList.remove(
+                        'hidden'
+                    );
+
+                    appMain.classList.add(
+                        'hidden'
+                    );
+
+                    refreshGroupsButton.classList.add(
+                        'hidden'
+                    );
+
+                    whatsappConnected =
+                        false;
+
+                    checkButton.disabled =
+                        true;
+
+                    setStatus(
+                        'Scan the QR code to connect WhatsApp.',
+                        'warning'
+                    );
+                }
+            );
+
+            currentSocket.on(
+                'ready',
+                data => {
+                    whatsappConnected =
+                        true;
+
+                    qrSection.classList.add(
+                        'hidden'
+                    );
+
+                    appMain.classList.remove(
+                        'hidden'
+                    );
+
+                    refreshGroupsButton.classList.remove(
+                        'hidden'
+                    );
+
+                    checkButton.disabled =
+                        false;
+
+                    if (
+                        data &&
+                        data.accountNumber
+                    ) {
+                        connectionAccount.textContent =
+                            `CONNECTED AS ${data.accountNumber}`;
+                    } else {
+                        connectionAccount.textContent =
+                            'WHATSAPP CONNECTED';
+                    }
+
+                    setStatus(
+                        'WhatsApp is connected.',
+                        'success'
+                    );
+
+                    loadGroups();
+                }
+            );
+
+            currentSocket.on(
+                'status',
+                data => {
+                    if (
+                        typeof data ===
+                        'string'
+                    ) {
+                        setStatus(
+                            data
+                        );
+
+                        return;
+                    }
+
+                    const type =
+                        data?.type ||
+                        'info';
+
+                    const message =
+                        data?.message ||
+                        '';
+
+                    if (message) {
+                        setStatus(
+                            message,
+                            type
+                        );
+                    }
+                }
+            );
+
+            currentSocket.on(
+                'groups',
+                data => {
+                    groups =
+                        Array.isArray(
+                            data
+                        )
+                            ? data
+                            : [];
+
+                    refreshGroupsButton.disabled =
+                        false;
+
+                    groupsLoading.classList.add(
+                        'hidden'
+                    );
+
+                    groupCount.textContent =
+                        String(
+                            groups.length
+                        );
+
+                    renderGroups(
+                        groups
+                    );
+                }
+            );
+
+            currentSocket.on(
+                'groupListError',
+                error => {
+                    refreshGroupsButton.disabled =
+                        false;
+
+                    groupsLoading.classList.add(
+                        'hidden'
+                    );
+
+                    groups = [];
+
+                    groupCount.textContent =
+                        '0';
+
+                    groupsList.innerHTML =
+                        '';
+
+                    groupsEmpty.classList.remove(
+                        'hidden'
+                    );
+
+                    groupsEmpty.textContent =
+                        String(
+                            error ||
+                            'Failed to load groups.'
+                        );
+
+                    setStatus(
+                        String(
+                            error ||
+                            'Failed to load groups.'
+                        ),
+                        'error'
+                    );
+                }
+            );
+
+            currentSocket.on(
+                'groupMembershipResult',
+                data => {
+                    checkingMembership =
+                        false;
+
+                    checkButton.disabled =
+                        false;
+
+                    checkButton.textContent =
+                        'Check Membership';
+
+                    const groupName =
+                        String(
+                            data?.groupName ||
+                            'Unknown Group'
+                        );
+
+                    const groupId =
+                        String(
+                            data?.groupId ||
+                            ''
+                        );
+
+                    const phone =
+                        String(
+                            data?.phoneNumber ||
+                            ''
+                        );
+
+                    if (
+                        data?.isMember
+                    ) {
+                        showMembershipResult(
+                            'success',
+                            `${phone} IS A MEMBER of "${groupName}".`
+                        );
+                    } else {
+                        showMembershipResult(
+                            'not-member',
+                            `${phone} IS NOT A MEMBER of "${groupName}".`
+                        );
+                    }
+
+                    const age =
+                        Number(
+                            data?.cacheAgeSeconds ||
+                            0
+                        );
+
+                    const ttl =
+                        Number(
+                            data?.cacheTtlSeconds ||
+                            0
+                        );
+
+                    const remaining =
+                        Math.max(
+                            0,
+                            ttl - age
+                        );
+
+                    const source =
+                        data?.fromCache
+                            ? 'Cached member list'
+                            : 'Fresh member list';
+
+                    cacheInfo.classList.remove(
+                        'hidden'
+                    );
+
+                    cacheInfo.innerHTML =
+                        `
+                        <div class="font-semibold text-slate-600">
+                            ${escapeHtml(source)}
+                        </div>
+
+                        <div class="mt-1">
+                            Group:
+                            <span class="font-mono">
+                                ${escapeHtml(groupId)}
+                            </span>
+                        </div>
+
+                        <div class="mt-1">
+                            Cache age:
+                            ${escapeHtml(age)}s
+                        </div>
+
+                        <div class="mt-1">
+                            Refresh in approximately:
+                            ${escapeHtml(remaining)}s
+                        </div>
+                        `;
+                }
+            );
+
+            currentSocket.on(
+                'groupMembershipError',
+                error => {
+                    checkingMembership =
+                        false;
+
+                    checkButton.disabled =
+                        false;
+
+                    checkButton.textContent =
+                        'Check Membership';
+
+                    showMembershipResult(
+                        'error',
+                        String(
+                            error ||
+                            'Failed to check membership.'
+                        )
+                    );
+                }
+            );
+
+            currentSocket.on(
+                'whatsappDisconnected',
+                reason => {
+                    whatsappConnected =
+                        false;
+
+                    checkButton.disabled =
+                        true;
+
+                    refreshGroupsButton.classList.add(
+                        'hidden'
+                    );
+
+                    setStatus(
+                        `WhatsApp disconnected: ${String(reason || 'Disconnected')}`,
+                        'error'
+                    );
+                }
+            );
+
+            currentSocket.on(
+                'whatsappState',
+                state => {
+                    if (state) {
+                        connectionAccount.textContent =
+                            `WHATSAPP STATE: ${String(state)}`;
+                    }
+                }
+            );
+        }
+
+        // =================================================
+        // ADMIN AUTHENTICATION
+        // =================================================
+
+        function connectAdmin() {
+            const key =
+                String(
+                    adminKeyInput.value || ''
+                );
+
+            if (key.length < 32) {
+                showAuthGate(
+                    'Admin key must be at least 32 characters.'
+                );
+
+                return;
+            }
+
+            authenticateButton.disabled =
+                true;
+
+            adminKey = key;
+
+            authError.textContent =
+                '';
+
+            authError.classList.add(
+                'hidden'
+            );
+
+            if (socket) {
+                socket.removeAllListeners();
+                socket.disconnect();
+                socket = null;
+            }
+
+            setStatus(
+                'Authenticating admin connection...'
+            );
+
+            try {
+                socket = io({
+                    auth: {
+                        key: adminKey
+                    },
+
+                    reconnection: false
+                });
+
+                bindSocketEvents(
+                    socket
+                );
+
+            } catch (error) {
+                adminKey = '';
 
                 setStatus(
-                    'Disconnected from server.',
+                    'Could not start admin connection.',
                     'error'
                 );
 
-            }
-        );
-
-        // =================================================
-        // QR
-        // =================================================
-
-        socket.on(
-            'qr',
-            url => {
-
-                qrImage.src =
-                    String(
-                        url || ''
-                    );
-
-                qrSection.classList.remove(
-                    'hidden'
+                showAuthGate(
+                    'Could not start admin connection.'
                 );
-
-                appMain.classList.add(
-                    'hidden'
-                );
-
-                refreshGroupsButton.classList.add(
-                    'hidden'
-                );
-
-                whatsappConnected =
+            } finally {
+                authenticateButton.disabled =
                     false;
+            }
+        }
 
-                checkButton.disabled =
-                    true;
+        authenticateButton.addEventListener(
+            'click',
+            connectAdmin
+        );
 
-                setStatus(
-                    'Scan the QR code to connect WhatsApp.',
-                    'warning'
-                );
-
+        adminKeyInput.addEventListener(
+            'keydown',
+            event => {
+                if (
+                    event.key === 'Enter'
+                ) {
+                    connectAdmin();
+                }
             }
         );
 
-        // =================================================
-        // READY
-        // =================================================
-
-        socket.on(
-            'ready',
-            data => {
-
-                whatsappConnected =
-                    true;
-
-                qrSection.classList.add(
-                    'hidden'
-                );
-
-                appMain.classList.remove(
-                    'hidden'
-                );
-
-                refreshGroupsButton.classList.remove(
-                    'hidden'
-                );
-
-                checkButton.disabled =
-                    false;
-
-                if (
-                    data &&
-                    data.accountNumber
-                ) {
-
-                    connectionAccount.textContent =
-                        `CONNECTED AS ${data.accountNumber}`;
-
-                } else {
-
-                    connectionAccount.textContent =
-                        'WHATSAPP CONNECTED';
-
-                }
-
-                setStatus(
-                    'WhatsApp is connected.',
-                    'success'
-                );
-
-                loadGroups();
-
-            }
-        );
-
-        // =================================================
-        // SERVER STATUS
-        // =================================================
-
-        socket.on(
-            'status',
-            data => {
-
-                if (
-                    typeof data ===
-                    'string'
-                ) {
-
-                    setStatus(
-                        data
-                    );
-
-                    return;
-
-                }
-
-                const type =
-                    data?.type ||
-                    'info';
-
-                const message =
-                    data?.message ||
-                    '';
-
-                if (
-                    message
-                ) {
-
-                    setStatus(
-                        message,
-                        type
-                    );
-
-                }
-
-            }
+        lockAdminButton.addEventListener(
+            'click',
+            lockAdmin
         );
 
         // =================================================
@@ -799,13 +1320,11 @@
         // =================================================
 
         function loadGroups() {
-
             if (
+                !socket ||
                 !whatsappConnected
             ) {
-
                 return;
-
             }
 
             groupsLoading.classList.remove(
@@ -825,91 +1344,21 @@
             socket.emit(
                 'getGroups'
             );
-
         }
 
-        socket.on(
-            'groups',
-            data => {
-
-                groups =
-                    Array.isArray(
-                        data
-                    )
-                        ? data
-                        : [];
-
-                refreshGroupsButton.disabled =
-                    false;
-
-                groupsLoading.classList.add(
-                    'hidden'
-                );
-
-                groupCount.textContent =
-                    String(
-                        groups.length
-                    );
-
-                renderGroups(
-                    groups
-                );
-
-            }
-        );
-
-        socket.on(
-            'groupListError',
-            error => {
-
-                refreshGroupsButton.disabled =
-                    false;
-
-                groupsLoading.classList.add(
-                    'hidden'
-                );
-
-                groups =
-                    [];
-
-                groupCount.textContent =
-                    '0';
-
-                groupsList.innerHTML =
-                    '';
-
-                groupsEmpty.classList.remove(
-                    'hidden'
-                );
-
-                groupsEmpty.textContent =
-                    String(
-                        error ||
-                        'Failed to load groups.'
-                    );
-
-                setStatus(
-                    String(
-                        error ||
-                        'Failed to load groups.'
-                    ),
-                    'error'
-                );
-
-            }
-        );
+        // =================================================
+        // GROUP RENDERING
+        // =================================================
 
         function renderGroups(
             groupData
         ) {
-
             groupsList.innerHTML =
                 '';
 
             if (
                 !groupData.length
             ) {
-
                 groupsEmpty.classList.remove(
                     'hidden'
                 );
@@ -918,7 +1367,6 @@
                     'No WhatsApp groups found.';
 
                 return;
-
             }
 
             groupsEmpty.classList.add(
@@ -927,7 +1375,6 @@
 
             groupData.forEach(
                 group => {
-
                     const row =
                         document.createElement(
                             'div'
@@ -1013,7 +1460,6 @@
                     useButton.addEventListener(
                         'click',
                         event => {
-
                             event.stopPropagation();
 
                             groupIdInput.value =
@@ -1023,7 +1469,6 @@
                                 );
 
                             groupIdInput.focus();
-
                         }
                     );
 
@@ -1044,7 +1489,6 @@
                     copyButton.addEventListener(
                         'click',
                         async event => {
-
                             event.stopPropagation();
 
                             const id =
@@ -1054,7 +1498,6 @@
                                 );
 
                             try {
-
                                 await navigator.clipboard.writeText(
                                     id
                                 );
@@ -1064,23 +1507,18 @@
 
                                 setTimeout(
                                     () => {
-
                                         copyButton.textContent =
                                             'Copy';
-
                                     },
                                     1200
                                 );
 
                             } catch (_) {
-
                                 setStatus(
                                     'Could not copy group ID.',
                                     'error'
                                 );
-
                             }
-
                         }
                     );
 
@@ -1107,23 +1545,19 @@
                     row.addEventListener(
                         'click',
                         () => {
-
                             groupIdInput.value =
                                 String(
                                     group?.id ||
                                     ''
                                 );
-
                         }
                     );
 
                     groupsList.appendChild(
                         row
                     );
-
                 }
             );
-
         }
 
         refreshGroupsButton.addEventListener(
@@ -1138,25 +1572,20 @@
         function isValidGroupId(
             value
         ) {
-
             return /^\d{10,40}@g\.us$/.test(
                 String(
                     value || ''
                 ).trim()
             );
-
         }
 
         function sanitizePhone(
             value
         ) {
-
             return String(
                 value || ''
             )
-                .normalize(
-                    'NFKC'
-                )
+                .normalize('NFKC')
                 .replace(
                     /\D/g,
                     ''
@@ -1165,16 +1594,12 @@
                     /^0+/,
                     ''
                 );
-
         }
 
         function validateInputs() {
-
             const groupId =
                 groupIdInput.value
-                    .normalize(
-                        'NFKC'
-                    )
+                    .normalize('NFKC')
                     .trim();
 
             const phone =
@@ -1182,10 +1607,7 @@
                     phoneInput.value
                 );
 
-            if (
-                !groupId
-            ) {
-
+            if (!groupId) {
                 showMembershipResult(
                     'error',
                     'Enter a Group ID.'
@@ -1194,7 +1616,6 @@
                 groupIdInput.focus();
 
                 return null;
-
             }
 
             if (
@@ -1202,7 +1623,6 @@
                     groupId
                 )
             ) {
-
                 showMembershipResult(
                     'error',
                     'Invalid Group ID. It must look like 120363428682544694@g.us.'
@@ -1211,13 +1631,9 @@
                 groupIdInput.focus();
 
                 return null;
-
             }
 
-            if (
-                !phone
-            ) {
-
+            if (!phone) {
                 showMembershipResult(
                     'error',
                     'Enter a phone number.'
@@ -1226,13 +1642,9 @@
                 phoneInput.focus();
 
                 return null;
-
             }
 
-            if (
-                phone.length !== 10
-            ) {
-
+            if (phone.length !== 10) {
                 showMembershipResult(
                     'error',
                     'Enter exactly 10 local digits without the country code.'
@@ -1241,7 +1653,6 @@
                 phoneInput.focus();
 
                 return null;
-
             }
 
             return {
@@ -1249,7 +1660,6 @@
                 phoneNumber:
                     phone
             };
-
         }
 
         // =================================================
@@ -1260,7 +1670,6 @@
             type,
             message
         ) {
-
             membershipResult.classList.remove(
                 'hidden'
             );
@@ -1268,40 +1677,33 @@
             if (
                 type === 'success'
             ) {
-
                 membershipResult.className =
                     'rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800';
 
             } else if (
                 type === 'not-member'
             ) {
-
                 membershipResult.className =
                     'rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800';
 
             } else if (
                 type === 'error'
             ) {
-
                 membershipResult.className =
                     'rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800';
 
             } else {
-
                 membershipResult.className =
                     'rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800';
-
             }
 
             membershipResult.textContent =
                 String(
                     message || ''
                 );
-
         }
 
         function showLoadingResult() {
-
             showMembershipResult(
                 'info',
                 'Checking group membership...'
@@ -1310,7 +1712,6 @@
             cacheInfo.classList.add(
                 'hidden'
             );
-
         }
 
         // =================================================
@@ -1318,37 +1719,29 @@
         // =================================================
 
         async function checkMembership() {
-
             if (
                 checkingMembership
             ) {
-
                 return;
-
             }
 
             if (
+                !socket ||
                 !whatsappConnected
             ) {
-
                 showMembershipResult(
                     'error',
                     'WhatsApp is not connected.'
                 );
 
                 return;
-
             }
 
             const values =
                 validateInputs();
 
-            if (
-                !values
-            ) {
-
+            if (!values) {
                 return;
-
             }
 
             checkingMembership =
@@ -1366,147 +1759,11 @@
                 'checkGroupMembership',
                 values
             );
-
         }
 
         checkButton.addEventListener(
             'click',
             checkMembership
-        );
-
-        // =================================================
-        // MEMBERSHIP SUCCESS
-        // =================================================
-
-        socket.on(
-            'groupMembershipResult',
-            data => {
-
-                checkingMembership =
-                    false;
-
-                checkButton.disabled =
-                    false;
-
-                checkButton.textContent =
-                    'Check Membership';
-
-                const groupName =
-                    String(
-                        data?.groupName ||
-                        'Unknown Group'
-                    );
-
-                const groupId =
-                    String(
-                        data?.groupId ||
-                        ''
-                    );
-
-                const phone =
-                    String(
-                        data?.phoneNumber ||
-                        ''
-                    );
-
-                if (
-                    data?.isMember
-                ) {
-
-                    showMembershipResult(
-                        'success',
-                        `${phone} IS A MEMBER of "${groupName}".`
-                    );
-
-                } else {
-
-                    showMembershipResult(
-                        'not-member',
-                        `${phone} IS NOT A MEMBER of "${groupName}".`
-                    );
-
-                }
-
-                const age =
-                    Number(
-                        data?.cacheAgeSeconds ||
-                        0
-                    );
-
-                const ttl =
-                    Number(
-                        data?.cacheTtlSeconds ||
-                        0
-                    );
-
-                const remaining =
-                    Math.max(
-                        0,
-                        ttl - age
-                    );
-
-                const source =
-                    data?.fromCache
-                        ? 'Cached member list'
-                        : 'Fresh member list';
-
-                cacheInfo.classList.remove(
-                    'hidden'
-                );
-
-                cacheInfo.innerHTML =
-                    `
-                    <div class="font-semibold text-slate-600">
-                        ${escapeHtml(source)}
-                    </div>
-
-                    <div class="mt-1">
-                        Group:
-                        <span class="font-mono">
-                            ${escapeHtml(groupId)}
-                        </span>
-                    </div>
-
-                    <div class="mt-1">
-                        Cache age:
-                        ${escapeHtml(age)}s
-                    </div>
-
-                    <div class="mt-1">
-                        Refresh in approximately:
-                        ${escapeHtml(remaining)}s
-                    </div>
-                    `;
-
-            }
-        );
-
-        // =================================================
-        // MEMBERSHIP ERROR
-        // =================================================
-
-        socket.on(
-            'groupMembershipError',
-            error => {
-
-                checkingMembership =
-                    false;
-
-                checkButton.disabled =
-                    false;
-
-                checkButton.textContent =
-                    'Check Membership';
-
-                showMembershipResult(
-                    'error',
-                    String(
-                        error ||
-                        'Failed to check membership.'
-                    )
-                );
-
-            }
         );
 
         // =================================================
@@ -1516,24 +1773,18 @@
         function bindEnter(
             input
         ) {
-
             input.addEventListener(
                 'keydown',
                 event => {
-
                     if (
                         event.key ===
-                        'Enter' &&
+                            'Enter' &&
                         !checkButton.disabled
                     ) {
-
                         checkMembership();
-
                     }
-
                 }
             );
-
         }
 
         bindEnter(
@@ -1545,51 +1796,12 @@
         );
 
         // =================================================
-        // WHATSAPP DISCONNECT
+        // INITIAL STATE
         // =================================================
 
-        socket.on(
-            'whatsappDisconnected',
-            reason => {
+        showAuthGate();
 
-                whatsappConnected =
-                    false;
-
-                checkButton.disabled =
-                    true;
-
-                refreshGroupsButton.classList.add(
-                    'hidden'
-                );
-
-                setStatus(
-                    `WhatsApp disconnected: ${String(reason || 'Disconnected')}`,
-                    'error'
-                );
-
-            }
-        );
-
-        // =================================================
-        // WHATSAPP STATE
-        // =================================================
-
-        socket.on(
-            'whatsappState',
-            state => {
-
-                if (
-                    state
-                ) {
-
-                    connectionAccount.textContent =
-                        `WHATSAPP STATE: ${String(state)}`;
-
-                }
-
-            }
-        );
-
+        adminKeyInput.focus();
     </script>
 
 </body>

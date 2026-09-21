@@ -1,11 +1,10 @@
 // FILE: server.js
-// Railway persistent-volume WhatsApp session version
+// Railway persistent-volume WhatsApp session + authenticated admin Socket.IO
 
 const express = require('express');
 const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
-const net = require('net');
 
 const { Server } = require('socket.io');
 const { Client, LocalAuth } = require('whatsapp-web.js');
@@ -13,7 +12,10 @@ const qrcode = require('qrcode');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+const io = new Server(server, {
+    maxHttpBufferSize: 64 * 1024
+});
 
 const PORT = Number(process.env.PORT || 3000);
 
@@ -29,14 +31,6 @@ const DEFAULT_COUNTRY_CODE = String(
     process.env.DEFAULT_COUNTRY_CODE || '91'
 ).replace(/\D/g, '');
 
-const API_RATE_LIMIT = Number(
-    process.env.API_RATE_LIMIT || 60
-);
-
-const API_RATE_WINDOW_MS = Number(
-    process.env.API_RATE_WINDOW_MS || 60 * 1000
-);
-
 const PAYLOAD_TTL_MS = Number(
     process.env.PAYLOAD_TTL_MS || 2 * 60 * 1000
 );
@@ -50,6 +44,12 @@ const MAX_CLOCK_SKEW_MS = Number(
 );
 
 const MAX_API_BODY_BYTES = 32 * 1024;
+const API_DOMAIN_HEADER = 'X-API-Domain';
+const PAYLOAD_VERSION = 2;
+
+const API_ENCRYPTION_SECRET = String(
+    process.env.API_ENCRYPTION_SECRET || ''
+);
 
 if (!DEFAULT_COUNTRY_CODE) {
     throw new Error(
@@ -67,35 +67,26 @@ if (
     );
 }
 
-if (
-    !process.env.API_ENCRYPTION_SECRET ||
-    String(process.env.API_ENCRYPTION_SECRET).length < 32
-) {
+if (API_ENCRYPTION_SECRET.length < 32) {
     throw new Error(
         'API_ENCRYPTION_SECRET is required and must be at least 32 characters.'
     );
 }
 
 /*
- * IMPORTANT:
+ * IMPORTANT
  *
- * API_ENCRYPTION_SECRET must NEVER be placed in browser JavaScript.
+ * API_ENCRYPTION_SECRET is also the admin key for the protected
+ * Socket.IO admin interface.
  *
- * The calling website should generate the encrypted payload from its
- * own backend/server using the same secret.
+ * Never place this secret in a normal public website.
+ * The admin page asks for it manually and keeps it only in memory.
+ *
+ * External websites must generate encrypted payloads on their
+ * backend/server, never in public browser JavaScript.
  */
 
 app.disable('x-powered-by');
-
-/*
- * Railway normally sits behind a proxy.
- *
- * This trusts one proxy hop so req.ip can represent the original
- * caller IP when the proxy supplies X-Forwarded-For.
- *
- * Make sure your deployment/proxy configuration is trusted.
- */
-app.set('trust proxy', 1);
 
 app.use(
     express.json({
@@ -153,38 +144,11 @@ let latestQr = null;
 
 const groupMemberCache = new Map();
 const groupMemberRefreshes = new Map();
-
-const rateLimitBuckets = new Map();
-
 const usedPayloadNonces = new Map();
 
 // =====================================================
-// IP / DOMAIN
+// DOMAIN
 // =====================================================
-
-function normalizeIpAddress(value) {
-    let ip = String(
-        value ?? ''
-    ).trim();
-
-    if (
-        ip.startsWith(
-            '::ffff:'
-        )
-    ) {
-        ip = ip.slice(7);
-    }
-
-    if (
-        !net.isIP(ip)
-    ) {
-        throw new Error(
-            'Invalid IP address.'
-        );
-    }
-
-    return ip;
-}
 
 function normalizeDomain(value) {
     let domain = String(
@@ -206,51 +170,24 @@ function normalizeDomain(value) {
     }
 
     if (
-        domain.includes(
-            '://'
-        ) ||
-        domain.includes(
-            '/'
-        ) ||
-        domain.includes(
-            '\\'
-        ) ||
-        domain.includes(
-            ':'
-        ) ||
-        domain.includes(
-            '@'
-        ) ||
-        domain.includes(
-            ' '
-        )
+        domain.includes('://') ||
+        domain.includes('/') ||
+        domain.includes('\\') ||
+        domain.includes(':') ||
+        domain.includes('@') ||
+        domain.includes(' ')
     ) {
         throw new Error(
             'Domain must be hostname only.'
         );
     }
 
-    if (
-        domain.length > 253
-    ) {
+    if (domain.length > 253) {
         throw new Error(
             'Domain is too long.'
         );
     }
 
-    /*
-     * Exact domain only.
-     *
-     * Examples:
-     *
-     * example.com
-     * www.example.com
-     *
-     * Not accepted:
-     * https://example.com
-     * example.com/path
-     * *.example.com
-     */
     if (
         !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(
             domain
@@ -264,31 +201,13 @@ function normalizeDomain(value) {
     return domain;
 }
 
-function getClientIp(req) {
-    let ip =
-        req.ip ||
-        req.socket?.remoteAddress ||
-        '0.0.0.0';
-
-    try {
-        return normalizeIpAddress(
-            ip
-        );
-    } catch (_) {
-        return '0.0.0.0';
-    }
-}
-
-// =====================================================
-// DOMAIN WHITELIST (ENVIRONMENT VARIABLE)
-// =====================================================
-
 function parseDomainWhitelist(value) {
-    const rawDomains =
-        String(value || '')
-            .split(',')
-            .map(domain => domain.trim())
-            .filter(Boolean);
+    const rawDomains = String(
+        value || ''
+    )
+        .split(',')
+        .map(domain => domain.trim())
+        .filter(Boolean);
 
     const domains = new Set();
 
@@ -327,184 +246,42 @@ console.log(
 );
 
 function isWhitelistedDomain(domain) {
-    const normalizedDomain =
-        normalizeDomain(
-            domain
-        );
-
     return API_DOMAIN_WHITELIST.has(
-        normalizedDomain
+        normalizeDomain(domain)
     );
-}
-
-// =====================================================
-// RATE LIMIT
-// =====================================================
-
-function consumeRateLimit(
-    map,
-    key,
-    limit,
-    windowMs
-) {
-    const now =
-        Date.now();
-
-    const current =
-        map.get(key);
-
-    if (
-        !current ||
-        now -
-            current.windowStartedAt >=
-            windowMs
-    ) {
-        map.set(
-            key,
-            {
-                windowStartedAt:
-                    now,
-                count: 1
-            }
-        );
-
-        return {
-            allowed: true,
-            retryAfterSeconds:
-                Math.ceil(
-                    windowMs /
-                        1000
-                )
-        };
-    }
-
-    current.count += 1;
-
-    if (
-        current.count >
-        limit
-    ) {
-        return {
-            allowed: false,
-            retryAfterSeconds:
-                Math.max(
-                    1,
-                    Math.ceil(
-                        (
-                            windowMs -
-                            (
-                                now -
-                                current.windowStartedAt
-                            )
-                        ) /
-                            1000
-                    )
-                )
-        };
-    }
-
-    return {
-        allowed: true,
-        retryAfterSeconds:
-            Math.ceil(
-                windowMs /
-                    1000
-            )
-    };
-}
-
-function cleanupRateLimitMap(
-    map
-) {
-    if (
-        map.size < 5000
-    ) {
-        return;
-    }
-
-    const now =
-        Date.now();
-
-    for (
-        const [
-            key,
-            bucket
-        ] of map
-    ) {
-        if (
-            now -
-                bucket.windowStartedAt >
-            10 * 60 * 1000
-        ) {
-            map.delete(
-                key
-            );
-        }
-    }
 }
 
 // =====================================================
 // ENCRYPTION
 // =====================================================
 
-function deriveAesKey(
-    secret
-) {
+function deriveAesKey(secret) {
     return crypto
-        .createHash(
-            'sha256'
-        )
+        .createHash('sha256')
         .update(
-            String(
-                secret
-            ),
+            String(secret),
             'utf8'
         )
         .digest();
 }
 
-function toBase64Url(
-    buffer
-) {
-    return Buffer.from(
-        buffer
-    )
-        .toString(
-            'base64'
-        )
-        .replace(
-            /\+/g,
-            '-'
-        )
-        .replace(
-            /\//g,
-            '_'
-        )
-        .replace(
-            /=+$/g,
-            ''
-        );
+function toBase64Url(buffer) {
+    return Buffer.from(buffer)
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/g, '');
 }
 
-function fromBase64Url(
-    value
-) {
-    const normalized =
-        String(
-            value || ''
-        )
-            .replace(
-                /-/g,
-                '+'
-            )
-            .replace(
-                /_/g,
-                '/'
-            );
+function fromBase64Url(value) {
+    const normalized = String(
+        value || ''
+    )
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
 
     const remainder =
-        normalized.length %
-        4;
+        normalized.length % 4;
 
     const padded =
         remainder === 0
@@ -520,69 +297,69 @@ function fromBase64Url(
     );
 }
 
+/*
+ * AES-256-GCM with authenticated additional data (AAD).
+ *
+ * The domain is NOT stored inside the encrypted JSON anymore.
+ * Instead, the normalized X-API-Domain header is authenticated
+ * as AAD. This prevents an attacker from taking a valid encrypted
+ * payload and changing only the domain header.
+ */
 function encryptObject(
     object,
-    secret
+    secret,
+    associatedData
 ) {
-    const key =
-        deriveAesKey(
-            secret
-        );
+    const key = deriveAesKey(
+        secret
+    );
 
-    const iv =
-        crypto.randomBytes(
-            12
-        );
+    const aad = Buffer.from(
+        String(associatedData),
+        'utf8'
+    );
 
-    const cipher =
-        crypto.createCipheriv(
-            'aes-256-gcm',
-            key,
-            iv
-        );
+    const iv = crypto.randomBytes(
+        12
+    );
 
-    const plaintext =
-        Buffer.from(
-            JSON.stringify(
-                object
-            ),
-            'utf8'
-        );
+    const cipher = crypto.createCipheriv(
+        'aes-256-gcm',
+        key,
+        iv
+    );
 
-    const ciphertext =
-        Buffer.concat([
-            cipher.update(
-                plaintext
-            ),
-            cipher.final()
-        ]);
+    cipher.setAAD(aad);
+
+    const plaintext = Buffer.from(
+        JSON.stringify(object),
+        'utf8'
+    );
+
+    const ciphertext = Buffer.concat([
+        cipher.update(plaintext),
+        cipher.final()
+    ]);
 
     const authTag =
         cipher.getAuthTag();
 
     return [
-        'v1',
-        toBase64Url(
-            iv
-        ),
-        toBase64Url(
-            authTag
-        ),
-        toBase64Url(
-            ciphertext
-        )
+        'v2',
+        toBase64Url(iv),
+        toBase64Url(authTag),
+        toBase64Url(ciphertext)
     ].join('.');
 }
 
 function decryptObject(
     encodedPayload,
-    secret
+    secret,
+    associatedData
 ) {
-    const value =
-        String(
-            encodedPayload ||
-                ''
-        ).trim();
+    const value = String(
+        encodedPayload || ''
+    ).trim();
 
     if (
         !value ||
@@ -593,27 +370,24 @@ function decryptObject(
         );
     }
 
-    const parts =
-        value.split('.');
+    const parts = value.split('.');
 
     if (
         parts.length !== 4 ||
-        parts[0] !== 'v1'
+        parts[0] !== 'v2'
     ) {
         throw new Error(
             'Invalid encrypted payload.'
         );
     }
 
-    const iv =
-        fromBase64Url(
-            parts[1]
-        );
+    const iv = fromBase64Url(
+        parts[1]
+    );
 
-    const authTag =
-        fromBase64Url(
-            parts[2]
-        );
+    const authTag = fromBase64Url(
+        parts[2]
+    );
 
     const ciphertext =
         fromBase64Url(
@@ -632,10 +406,14 @@ function decryptObject(
     }
 
     try {
-        const key =
-            deriveAesKey(
-                secret
-            );
+        const key = deriveAesKey(
+            secret
+        );
+
+        const aad = Buffer.from(
+            String(associatedData),
+            'utf8'
+        );
 
         const decipher =
             crypto.createDecipheriv(
@@ -644,32 +422,22 @@ function decryptObject(
                 iv
             );
 
-        decipher.setAuthTag(
-            authTag
+        decipher.setAAD(aad);
+        decipher.setAuthTag(authTag);
+
+        const plaintext = Buffer.concat([
+            decipher.update(ciphertext),
+            decipher.final()
+        ]);
+
+        const parsed = JSON.parse(
+            plaintext.toString('utf8')
         );
-
-        const plaintext =
-            Buffer.concat([
-                decipher.update(
-                    ciphertext
-                ),
-                decipher.final()
-            ]);
-
-        const parsed =
-            JSON.parse(
-                plaintext.toString(
-                    'utf8'
-                )
-            );
 
         if (
             !parsed ||
-            typeof parsed !==
-                'object' ||
-            Array.isArray(
-                parsed
-            )
+            typeof parsed !== 'object' ||
+            Array.isArray(parsed)
         ) {
             throw new Error(
                 'Invalid payload object.'
@@ -689,24 +457,15 @@ function decryptObject(
 // REPLAY PROTECTION
 // =====================================================
 
-function cleanupNonceMap(
-    map
-) {
-    const now =
-        Date.now();
+function cleanupNonceMap(map) {
+    const now = Date.now();
 
-    for (
-        const [
-            nonce,
-            expiresAt
-        ] of map
-    ) {
-        if (
-            expiresAt <= now
-        ) {
-            map.delete(
-                nonce
-            );
+    for (const [
+        nonce,
+        expiresAt
+    ] of map) {
+        if (expiresAt <= now) {
+            map.delete(nonce);
         }
     }
 }
@@ -715,13 +474,10 @@ function consumeNonce(
     map,
     nonce
 ) {
-    cleanupNonceMap(
-        map
-    );
+    cleanupNonceMap(map);
 
     if (
-        typeof nonce !==
-            'string' ||
+        typeof nonce !== 'string' ||
         !/^[A-Za-z0-9_-]{22,128}$/.test(
             nonce
         )
@@ -731,11 +487,7 @@ function consumeNonce(
         );
     }
 
-    if (
-        map.has(
-            nonce
-        )
-    ) {
+    if (map.has(nonce)) {
         throw new Error(
             'Replay detected.'
         );
@@ -747,22 +499,15 @@ function consumeNonce(
             PAYLOAD_NONCE_TTL_MS
     );
 
-    if (
-        map.size > 10000
-    ) {
-        cleanupNonceMap(
-            map
-        );
+    if (map.size > 10000) {
+        cleanupNonceMap(map);
     }
 }
 
-function validateTimestamp(
-    timestamp
-) {
-    const numeric =
-        Number(
-            timestamp
-        );
+function validateTimestamp(timestamp) {
+    const numeric = Number(
+        timestamp
+    );
 
     if (
         !Number.isSafeInteger(
@@ -774,11 +519,9 @@ function validateTimestamp(
         );
     }
 
-    const age =
-        Math.abs(
-            Date.now() -
-                numeric
-        );
+    const age = Math.abs(
+        Date.now() - numeric
+    );
 
     if (
         age >
@@ -797,19 +540,12 @@ function assertAllowedKeys(
     object,
     allowedKeys
 ) {
-    const keys =
-        Object.keys(
-            object
-        );
+    const keys = Object.keys(
+        object
+    );
 
-    for (
-        const key of keys
-    ) {
-        if (
-            !allowedKeys.has(
-                key
-            )
-        ) {
+    for (const key of keys) {
+        if (!allowedKeys.has(key)) {
             throw new Error(
                 'Unexpected payload field.'
             );
@@ -821,17 +557,12 @@ function assertAllowedKeys(
 // PAYLOAD VALIDATION
 // =====================================================
 
-function normalizeGroupId(
-    value
-) {
-    const groupId =
-        String(
-            value ?? ''
-        )
-            .normalize(
-                'NFKC'
-            )
-            .trim();
+function normalizeGroupId(value) {
+    const groupId = String(
+        value ?? ''
+    )
+        .normalize('NFKC')
+        .trim();
 
     if (
         !/^\d{10,40}@g\.us$/.test(
@@ -846,17 +577,12 @@ function normalizeGroupId(
     return groupId;
 }
 
-function normalizeLocalPhoneNumber(
-    value
-) {
-    const raw =
-        String(
-            value ?? ''
-        )
-            .normalize(
-                'NFKC'
-            )
-            .trim();
+function normalizeLocalPhoneNumber(value) {
+    const raw = String(
+        value ?? ''
+    )
+        .normalize('NFKC')
+        .trim();
 
     if (!raw) {
         throw new Error(
@@ -864,11 +590,7 @@ function normalizeLocalPhoneNumber(
         );
     }
 
-    if (
-        raw.includes(
-            '+'
-        )
-    ) {
+    if (raw.includes('+')) {
         throw new Error(
             'Phone number must not contain a country code.'
         );
@@ -884,32 +606,24 @@ function normalizeLocalPhoneNumber(
         );
     }
 
-    let local =
-        raw.replace(
-            /\D/g,
-            ''
-        );
+    let local = raw.replace(
+        /\D/g,
+        ''
+    );
 
-    if (
-        local.startsWith(
-            '00'
-        )
-    ) {
+    if (local.startsWith('00')) {
         throw new Error(
             'Phone number must not contain a country code.'
         );
     }
 
-    local =
-        local.replace(
-            /^0+/,
-            ''
-        );
+    local = local.replace(
+        /^0+/,
+        ''
+    );
 
     if (
-        !/^\d+$/.test(
-            local
-        ) ||
+        !/^\d+$/.test(local) ||
         local.length !==
             LOCAL_PHONE_LENGTH
     ) {
@@ -922,10 +636,7 @@ function normalizeLocalPhoneNumber(
         DEFAULT_COUNTRY_CODE +
         local;
 
-    if (
-        international.length >
-        15
-    ) {
+    if (international.length > 15) {
         throw new Error(
             'Phone number is too long.'
         );
@@ -947,16 +658,13 @@ function validateMembershipPayload(
             'timestamp',
             'nonce',
             'phoneNumber',
-            'groupId',
-            'clientIp',
-            'domain'
+            'groupId'
         ])
     );
 
     if (
-        Number(
-            payload.version
-        ) !== 1
+        Number(payload.version) !==
+        PAYLOAD_VERSION
     ) {
         throw new Error(
             'Unsupported payload version.'
@@ -986,16 +694,6 @@ function validateMembershipPayload(
             payload.groupId
         );
 
-    const clientIp =
-        normalizeIpAddress(
-            payload.clientIp
-        );
-
-    const domain =
-        normalizeDomain(
-            payload.domain
-        );
-
     return {
         phoneNumber:
             phone.local,
@@ -1003,11 +701,7 @@ function validateMembershipPayload(
         internationalPhone:
             phone.international,
 
-        groupId,
-
-        clientIp,
-
-        domain
+        groupId
     };
 }
 
@@ -1019,25 +713,23 @@ function validateMembershipPayload(
  * PERSISTENT WHATSAPP SESSION STORAGE
  *
  * Priority:
- *
  * 1. WWEBJS_AUTH_PATH
  * 2. Railway Volume mount path + /.wwebjs_auth
  * 3. Local fallback inside the project
- *
- * When a Railway Volume is attached, Railway automatically
- * provides RAILWAY_VOLUME_MOUNT_PATH.
  */
 
 const railwayVolumeMountPath =
     String(
-        process.env.RAILWAY_VOLUME_MOUNT_PATH ||
+        process.env
+            .RAILWAY_VOLUME_MOUNT_PATH ||
             ''
     ).trim();
 
 const authPath =
     process.env.WWEBJS_AUTH_PATH
         ? path.resolve(
-            process.env.WWEBJS_AUTH_PATH
+            process.env
+                .WWEBJS_AUTH_PATH
         )
         : railwayVolumeMountPath
             ? path.join(
@@ -1063,33 +755,30 @@ console.log(
     authPath
 );
 
-const client =
-    new Client({
-        authStrategy:
-            new LocalAuth({
-                dataPath:
-                    authPath
-            }),
+const client = new Client({
+    authStrategy: new LocalAuth({
+        dataPath: authPath
+    }),
 
-        puppeteer: {
-            executablePath:
-                process.env
-                    .PUPPETEER_EXECUTABLE_PATH ||
-                undefined,
+    puppeteer: {
+        executablePath:
+            process.env
+                .PUPPETEER_EXECUTABLE_PATH ||
+            undefined,
 
-            headless: true,
+        headless: true,
 
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote'
-            ]
-        }
-    });
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote'
+        ]
+    }
+});
 
 // =====================================================
 // GROUP LIST
@@ -1112,16 +801,13 @@ async function getGroupList() {
                     'WAWebCollections'
                 );
 
-            if (
-                !collections?.Chat
-            ) {
+            if (!collections?.Chat) {
                 throw new Error(
                     'WhatsApp group collection is unavailable.'
                 );
             }
 
-            const unique =
-                new Map();
+            const unique = new Map();
 
             for (
                 const chat of
@@ -1140,9 +826,7 @@ async function getGroupList() {
 
                     if (
                         !id ||
-                        !String(
-                            id
-                        ).endsWith(
+                        !String(id).endsWith(
                             '@g.us'
                         )
                     ) {
@@ -1157,20 +841,13 @@ async function getGroupList() {
                         'Unnamed Group';
 
                     unique.set(
-                        String(
-                            id
-                        ),
+                        String(id),
                         {
-                            id:
-                                String(
-                                    id
-                                ),
-
-                            name:
-                                String(
-                                    name ||
-                                        'Unnamed Group'
-                                )
+                            id: String(id),
+                            name: String(
+                                name ||
+                                'Unnamed Group'
+                            )
                         }
                     );
 
@@ -1180,10 +857,7 @@ async function getGroupList() {
             return Array.from(
                 unique.values()
             ).sort(
-                (
-                    a,
-                    b
-                ) =>
+                (a, b) =>
                     a.name.localeCompare(
                         b.name
                     )
@@ -1267,7 +941,7 @@ async function fetchGroupParticipantsWithPhones(
                 console.warn(
                     'Group metadata refresh warning:',
                     error?.message ||
-                        String(error)
+                    String(error)
                 );
             }
 
@@ -1283,11 +957,8 @@ async function fetchGroupParticipantsWithPhones(
                     ?.serialize?.() ||
                 [];
 
-            const phoneNumbers =
-                [];
-
-            const unresolvedLids =
-                [];
+            const phoneNumbers = [];
+            const unresolvedLids = [];
 
             for (
                 const participant of
@@ -1319,8 +990,7 @@ async function fetchGroupParticipantsWithPhones(
                 ) {
                     const digits =
                         String(
-                            id.user ||
-                                ''
+                            id.user || ''
                         ).replace(
                             /\D/g,
                             ''
@@ -1351,9 +1021,10 @@ async function fetchGroupParticipantsWithPhones(
 
                         if (
                             window.WWebJS &&
-                            typeof window
-                                .WWebJS
-                                .enforceLidAndPnRetrieval ===
+                            typeof
+                                window
+                                    .WWebJS
+                                    .enforceLidAndPnRetrieval ===
                                 'function'
                         ) {
                             resolved =
@@ -1407,9 +1078,7 @@ async function fetchGroupParticipantsWithPhones(
                         console.warn(
                             `Could not resolve LID ${serialized}:`,
                             error?.message ||
-                                String(
-                                    error
-                                )
+                            String(error)
                         );
                     }
                 }
@@ -1445,9 +1114,7 @@ async function fetchGroupParticipantsWithPhones(
 async function fetchGroupMemberCache(
     groupId
 ) {
-    if (
-        !whatsappReady
-    ) {
+    if (!whatsappReady) {
         throw new Error(
             'WhatsApp is not ready.'
         );
@@ -1468,10 +1135,9 @@ async function fetchGroupMemberCache(
             normalizedGroupId
         );
 
-    const memberPhones =
-        new Set(
-            data.phoneNumbers
-        );
+    const memberPhones = new Set(
+        data.phoneNumbers
+    );
 
     const cacheEntry = {
         groupId:
@@ -1486,7 +1152,7 @@ async function fetchGroupMemberCache(
         memberCount:
             Number(
                 data.participantCount ||
-                    0
+                0
             ),
 
         resolvedPhoneCount:
@@ -1495,7 +1161,7 @@ async function fetchGroupMemberCache(
         unresolvedLidCount:
             Number(
                 data.unresolvedLidCount ||
-                    0
+                0
             ),
 
         fetchedAt:
@@ -1530,8 +1196,7 @@ async function getGroupMemberCache(
             normalizedGroupId
         );
 
-    const now =
-        Date.now();
+    const now = Date.now();
 
     if (
         existing &&
@@ -1539,7 +1204,7 @@ async function getGroupMemberCache(
             now -
             existing.fetchedAt
         ) <
-            GROUP_MEMBER_CACHE_TTL_MS
+        GROUP_MEMBER_CACHE_TTL_MS
     ) {
         return {
             ...existing,
@@ -1618,10 +1283,6 @@ async function checkGroupMembership(
             normalizedGroupId
         );
 
-    /*
-     * Exact full international-number
-     * comparison.
-     */
     const isMember =
         cache.memberPhones.has(
             phone.international
@@ -1658,7 +1319,7 @@ async function checkGroupMembership(
         cacheTtlSeconds:
             Math.floor(
                 GROUP_MEMBER_CACHE_TTL_MS /
-                    1000
+                1000
             )
     };
 }
@@ -1672,10 +1333,7 @@ async function requireEncryptedMembershipRequest(
     res,
     next
 ) {
-    if (
-        req.method !==
-        'POST'
-    ) {
+    if (req.method !== 'POST') {
         return res
             .status(405)
             .json({
@@ -1685,63 +1343,78 @@ async function requireEncryptedMembershipRequest(
             });
     }
 
-    const sourceIp =
-        getClientIp(req);
-
-    /*
-     * RATE LIMIT BY ACTUAL SOURCE IP
-     */
-    const sourceRate =
-        consumeRateLimit(
-            rateLimitBuckets,
-            `source:${sourceIp}`,
-            API_RATE_LIMIT,
-            API_RATE_WINDOW_MS
+    const rawHeaderDomain =
+        req.get(
+            API_DOMAIN_HEADER
         );
 
-    cleanupRateLimitMap(
-        rateLimitBuckets
-    );
-
-    if (
-        !sourceRate.allowed
-    ) {
-        res.setHeader(
-            'Retry-After',
-            String(
-                sourceRate.retryAfterSeconds
-            )
-        );
-
+    if (!rawHeaderDomain) {
         return res
-            .status(429)
+            .status(400)
             .json({
                 success: false,
                 error:
-                    'Too many requests from this IP.'
+                    `Missing ${API_DOMAIN_HEADER} header.`
+            });
+    }
+
+    let requestDomain;
+
+    try {
+        requestDomain =
+            normalizeDomain(
+                rawHeaderDomain
+            );
+    } catch (_) {
+        return res
+            .status(400)
+            .json({
+                success: false,
+                error:
+                    'Invalid request domain header.'
             });
     }
 
     /*
-     * ONLY ONE FIELD ALLOWED:
+     * Domain authorization comes from the HTTP header.
+     *
+     * The same normalized domain is also used as AES-GCM AAD
+     * during decryption, so the header is cryptographically
+     * bound to the encrypted payload.
+     */
+    if (
+        !isWhitelistedDomain(
+            requestDomain
+        )
+    ) {
+        console.warn(
+            'DOMAIN WHITELIST REJECTED:',
+            requestDomain
+        );
+
+        return res
+            .status(403)
+            .json({
+                success: false,
+                error:
+                    'Request domain is not whitelisted.'
+            });
+    }
+
+    /*
+     * ONLY ONE BODY FIELD:
      *
      * {
-     *     "payload": "v1...."
+     *     "payload": "v2...."
      * }
      */
     if (
         !req.body ||
-        typeof req.body !==
-            'object' ||
-        Array.isArray(
-            req.body
-        ) ||
-        typeof req.body
-            .payload !==
+        typeof req.body !== 'object' ||
+        Array.isArray(req.body) ||
+        typeof req.body.payload !==
             'string' ||
-        Object.keys(
-            req.body
-        ).length !== 1
+        Object.keys(req.body).length !== 1
     ) {
         return res
             .status(400)
@@ -1752,109 +1425,22 @@ async function requireEncryptedMembershipRequest(
             });
     }
 
-    let decrypted;
-
     try {
-        /*
-         * DECRYPT PAYLOAD
-         */
-        decrypted =
+        const decrypted =
             decryptObject(
                 req.body.payload,
-                process.env
-                    .API_ENCRYPTION_SECRET
+                API_ENCRYPTION_SECRET,
+                requestDomain
             );
 
-        /*
-         * VALIDATE EVERYTHING
-         */
         const data =
             validateMembershipPayload(
                 decrypted
             );
 
-        /*
-         * DOMAIN WHITELIST ONLY
-         *
-         * Authorization is based ONLY on the encrypted domain.
-         * The request source IP is not consulted for whitelist
-         * authorization.
-         */
-        const domainWhitelisted =
-            isWhitelistedDomain(
-                data.domain
-            );
-
-        console.log(
-            'DOMAIN WHITELIST CHECK:',
-            JSON.stringify({
-                domain:
-                    data.domain,
-                whitelisted:
-                    domainWhitelisted
-            })
-        );
-
-        if (
-            !domainWhitelisted
-        ) {
-            return res
-                .status(403)
-                .json({
-                    success:
-                        false,
-                    error:
-                        'Request domain is not whitelisted.',
-                    requestDomain:
-                        data.domain
-                });
-        }
-
-        /*
-         * RATE LIMIT BY ENCRYPTED CLIENT IP
-         *
-         * This allows your website backend to provide
-         * the end-user IP separately.
-         */
-        const clientRate =
-            consumeRateLimit(
-                rateLimitBuckets,
-                `client:${data.clientIp}`,
-                API_RATE_LIMIT,
-                API_RATE_WINDOW_MS
-            );
-
-        cleanupRateLimitMap(
-            rateLimitBuckets
-        );
-
-        if (
-            !clientRate.allowed
-        ) {
-            res.setHeader(
-                'Retry-After',
-                String(
-                    clientRate.retryAfterSeconds
-                )
-            );
-
-            return res
-                .status(429)
-                .json({
-                    success: false,
-                    error:
-                        'Too many requests for this client IP.'
-                });
-        }
-
-        /*
-         * Store the validated encrypted payload.
-         *
-         * The encrypted domain has already been checked
-         * against the API_DOMAIN_WHITELIST environment variable above.
-         */
-        req.encryptedPayload =
-            data;
+        req.encryptedPayload = data;
+        req.requestDomain =
+            requestDomain;
 
         return next();
 
@@ -1911,8 +1497,7 @@ app.post(
             return res
                 .status(200)
                 .json({
-                    success:
-                        true,
+                    success: true,
                     ...result
                 });
 
@@ -1963,16 +1548,114 @@ app.post(
 );
 
 // =====================================================
+// SOCKET.IO ADMIN AUTHENTICATION
+// =====================================================
+
+function timingSafeSecretEqual(
+    provided
+) {
+    if (
+        typeof provided !== 'string'
+    ) {
+        return false;
+    }
+
+    const providedBuffer =
+        Buffer.from(
+            provided,
+            'utf8'
+        );
+
+    const expectedBuffer =
+        Buffer.from(
+            API_ENCRYPTION_SECRET,
+            'utf8'
+        );
+
+    if (
+        providedBuffer.length !==
+        expectedBuffer.length
+    ) {
+        return false;
+    }
+
+    return crypto.timingSafeEqual(
+        providedBuffer,
+        expectedBuffer
+    );
+}
+
+function isAdminSocket(socket) {
+    return Boolean(
+        socket?.data
+            ?.adminAuthenticated
+    );
+}
+
+io.use(
+    (socket, next) => {
+        const providedKey =
+            socket.handshake
+                ?.auth
+                ?.key;
+
+        if (
+            !timingSafeSecretEqual(
+                providedKey
+            )
+        ) {
+            return next(
+                new Error(
+                    'Admin authentication failed.'
+                )
+            );
+        }
+
+        socket.data.adminAuthenticated =
+            true;
+
+        return next();
+    }
+);
+
+function emitToAdminSockets(
+    event,
+    data
+) {
+    for (
+        const socket of
+        io.sockets.sockets.values()
+    ) {
+        if (
+            isAdminSocket(
+                socket
+            )
+        ) {
+            socket.emit(
+                event,
+                data
+            );
+        }
+    }
+}
+
+// =====================================================
 // SOCKET.IO
 // =====================================================
 
 io.on(
     'connection',
     socket => {
-
         console.log(
-            'Browser connected:',
+            'Authenticated admin connected:',
             socket.id
+        );
+
+        socket.emit(
+            'adminAuthenticated',
+            {
+                success: true
+            }
         );
 
         if (
@@ -1987,17 +1670,14 @@ io.on(
             socket.emit(
                 'status',
                 {
-                    type:
-                        'warning',
+                    type: 'warning',
                     message:
                         'Scan the QR code to connect WhatsApp.'
                 }
             );
         }
 
-        if (
-            whatsappReady
-        ) {
+        if (whatsappReady) {
             socket.emit(
                 'ready',
                 {
@@ -2010,14 +1690,11 @@ io.on(
                 socket
             );
 
-        } else if (
-            !latestQr
-        ) {
+        } else if (!latestQr) {
             socket.emit(
                 'status',
                 {
-                    type:
-                        'info',
+                    type: 'info',
                     message:
                         'Starting WhatsApp...'
                 }
@@ -2027,6 +1704,14 @@ io.on(
         socket.on(
             'getGroups',
             async () => {
+                if (
+                    !isAdminSocket(
+                        socket
+                    )
+                ) {
+                    return;
+                }
+
                 try {
                     await sendGroups(
                         socket
@@ -2043,14 +1728,26 @@ io.on(
         );
 
         /*
-         * UI-only membership check.
+         * Admin-only UI membership check.
          *
-         * The external website should use the encrypted
-         * POST API above.
+         * This is protected by the authenticated Socket.IO
+         * connection. External websites must use:
+         *
+         * POST /api/check-group-membership
+         *
+         * with the encrypted API request.
          */
         socket.on(
             'checkGroupMembership',
             async data => {
+                if (
+                    !isAdminSocket(
+                        socket
+                    )
+                ) {
+                    return;
+                }
+
                 try {
                     const result =
                         await checkGroupMembership(
@@ -2067,7 +1764,7 @@ io.on(
                     error
                 ) {
                     console.error(
-                        'Socket membership check error:',
+                        'Admin membership check error:',
                         error.message
                     );
 
@@ -2083,7 +1780,7 @@ io.on(
             'disconnect',
             () => {
                 console.log(
-                    'Browser disconnected:',
+                    'Admin disconnected:',
                     socket.id
                 );
             }
@@ -2095,8 +1792,14 @@ async function sendGroups(
     socket
 ) {
     if (
-        !whatsappReady
+        !isAdminSocket(
+            socket
+        )
     ) {
+        return;
+    }
+
+    if (!whatsappReady) {
         socket.emit(
             'groupListError',
             'WhatsApp is not ready yet.'
@@ -2117,8 +1820,7 @@ async function sendGroups(
         socket.emit(
             'status',
             {
-                type:
-                    'success',
+                type: 'success',
                 message:
                     `Loaded ${groups.length} groups.`
             }
@@ -2146,7 +1848,6 @@ async function sendGroups(
 client.on(
     'qr',
     async qr => {
-
         console.log(
             'NEW WHATSAPP QR RECEIVED'
         );
@@ -2157,19 +1858,17 @@ client.on(
                     qr
                 );
 
-            latestQr =
-                url;
+            latestQr = url;
 
-            io.emit(
+            emitToAdminSockets(
                 'qr',
                 url
             );
 
-            io.emit(
+            emitToAdminSockets(
                 'status',
                 {
-                    type:
-                        'warning',
+                    type: 'warning',
                     message:
                         'Scan the QR code to connect WhatsApp.'
                 }
@@ -2183,11 +1882,10 @@ client.on(
                 error
             );
 
-            io.emit(
+            emitToAdminSockets(
                 'status',
                 {
-                    type:
-                        'error',
+                    type: 'error',
                     message:
                         'Failed to generate QR code.'
                 }
@@ -2199,11 +1897,10 @@ client.on(
 client.on(
     'loading_screen',
     percent => {
-        io.emit(
+        emitToAdminSockets(
             'status',
             {
-                type:
-                    'info',
+                type: 'info',
                 message:
                     `WhatsApp loading: ${percent}%`
             }
@@ -2214,19 +1911,16 @@ client.on(
 client.on(
     'authenticated',
     () => {
-
         console.log(
             'WhatsApp authenticated.'
         );
 
-        latestQr =
-            null;
+        latestQr = null;
 
-        io.emit(
+        emitToAdminSockets(
             'status',
             {
-                type:
-                    'info',
+                type: 'info',
                 message:
                     'WhatsApp authenticated. Loading...'
             }
@@ -2237,12 +1931,8 @@ client.on(
 client.on(
     'auth_failure',
     error => {
-
-        whatsappReady =
-            false;
-
-        latestQr =
-            null;
+        whatsappReady = false;
+        latestQr = null;
 
         clearGroupMemberCache();
 
@@ -2251,11 +1941,10 @@ client.on(
             error
         );
 
-        io.emit(
+        emitToAdminSockets(
             'status',
             {
-                type:
-                    'error',
+                type: 'error',
                 message:
                     'WhatsApp authentication failed.'
             }
@@ -2266,12 +1955,8 @@ client.on(
 client.on(
     'ready',
     async () => {
-
-        whatsappReady =
-            true;
-
-        latestQr =
-            null;
+        whatsappReady = true;
+        latestQr = null;
 
         clearGroupMemberCache();
 
@@ -2279,7 +1964,7 @@ client.on(
             'WHATSAPP READY'
         );
 
-        io.emit(
+        emitToAdminSockets(
             'ready',
             {
                 message:
@@ -2287,11 +1972,10 @@ client.on(
             }
         );
 
-        io.emit(
+        emitToAdminSockets(
             'status',
             {
-                type:
-                    'success',
+                type: 'success',
                 message:
                     'WhatsApp is connected.'
             }
@@ -2301,12 +1985,16 @@ client.on(
             await Promise.all(
                 Array.from(
                     io.sockets.sockets.values()
-                ).map(
-                    socket =>
-                        sendGroups(
-                            socket
-                        )
                 )
+                    .filter(
+                        isAdminSocket
+                    )
+                    .map(
+                        socket =>
+                            sendGroups(
+                                socket
+                            )
+                    )
             );
 
         } catch (
@@ -2323,12 +2011,8 @@ client.on(
 client.on(
     'disconnected',
     reason => {
-
-        whatsappReady =
-            false;
-
-        latestQr =
-            null;
+        whatsappReady = false;
+        latestQr = null;
 
         clearGroupMemberCache();
 
@@ -2337,19 +2021,18 @@ client.on(
             reason
         );
 
-        io.emit(
+        emitToAdminSockets(
             'whatsappDisconnected',
             String(
                 reason ||
-                    'Disconnected'
+                'Disconnected'
             )
         );
 
-        io.emit(
+        emitToAdminSockets(
             'status',
             {
-                type:
-                    'error',
+                type: 'error',
                 message:
                     'WhatsApp disconnected.'
             }
@@ -2360,13 +2043,12 @@ client.on(
 client.on(
     'change_state',
     state => {
-
         console.log(
             'WhatsApp state:',
             state
         );
 
-        io.emit(
+        emitToAdminSockets(
             'whatsappState',
             String(state)
         );
@@ -2379,7 +2061,6 @@ client.on(
 
 function clearGroupMemberCache() {
     groupMemberCache.clear();
-
     groupMemberRefreshes.clear();
 
     console.log(
@@ -2389,15 +2070,9 @@ function clearGroupMemberCache() {
 
 setInterval(
     () => {
-
         cleanupNonceMap(
             usedPayloadNonces
         );
-
-        cleanupRateLimitMap(
-            rateLimitBuckets
-        );
-
     },
     60 * 1000
 ).unref();
@@ -2434,7 +2109,6 @@ async function start() {
     server.listen(
         PORT,
         () => {
-
             console.log(
                 `Server running on port ${PORT}`
             );
@@ -2444,6 +2118,9 @@ async function start() {
                 '/api/check-group-membership'
             );
 
+            console.log(
+                'Admin Socket.IO authentication: enabled'
+            );
         }
     );
 
@@ -2452,23 +2129,20 @@ async function start() {
     );
 
     try {
-
         await client.initialize();
 
     } catch (
         error
     ) {
-
         console.error(
             'WhatsApp initialize error:',
             error
         );
 
-        io.emit(
+        emitToAdminSockets(
             'status',
             {
-                type:
-                    'error',
+                type: 'error',
                 message:
                     'WhatsApp initialization failed.'
             }
@@ -2478,7 +2152,6 @@ async function start() {
 
 start().catch(
     error => {
-
         console.error(
             'Fatal startup error:',
             error

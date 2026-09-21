@@ -9,10 +9,7 @@ const PORT =
     );
 
 const TABLES = [
-    'api_domain_whitelist',
-    'api_ip_whitelist',
-    'chat_messages',
-    'recent_chats'
+    'api_whitelist'
 ];
 
 let cleanupResult = {
